@@ -83,7 +83,6 @@ export default function Login() {
       <main className="flex items-center justify-center p-6">
         <div className="w-full max-w-sm">
           <div className="mb-6 flex items-center gap-2 text-sm font-semibold lg:hidden"><span className="grid h-7 w-7 place-items-center rounded-md bg-brand text-white"><LineChart size={15} /></span>OEM Revenue Forecast</div>
-          <div role="status" className="mb-5 rounded-md bg-warn/30 px-3 py-1.5 text-center text-xs font-semibold tracking-wide">[SYNTHETIC DEMO MODE]</div>
           <h2 className="text-2xl font-semibold">Welcome back</h2>
           <p className="mb-6 mt-1 text-sm text-ink2">Sign in to your planning workspace.</p>
           <form onSubmit={submit} className="space-y-4">
@@ -113,7 +112,6 @@ export default function Login() {
               })}
             </div>
           </div>
-          <p className="mt-8 text-center text-[11px] text-muted">Demo data is generated. Accuracy shown is not customer evidence.</p>
         </div>
       </main>
     </div>

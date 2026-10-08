@@ -8,7 +8,7 @@
 
 [Quickstart](#-quickstart) · [Product tour](#-product-tour) · [How it works](#-how-it-works) · [Roles](#-roles--permissions) · [API](#-api-at-a-glance) · [Configuration](#-configuration) · [Development](#-development) · [Troubleshooting](#-troubleshooting) · [Limitations](#-honest-limitations)
 
-> **[SYNTHETIC DEMO MODE]** — the repo ships with a deterministic synthetic data generator so everything runs without SAP or Salesforce. Accuracy numbers you see are properties of fake data, **not evidence of real-world performance.**
+> Bring your own data (file, zip or URL), load the public M5 benchmark, or generate a deterministic synthetic estate so everything runs without SAP or Salesforce. Each dataset lives in its own workspace. Accuracy on synthetic workspaces is a property of generated data, **not evidence of real-world performance** (those workspaces show a banner).
 
 </div>
 
@@ -118,7 +118,7 @@ TOKEN=$(curl -s localhost:8000/api/v1/auth/login -H 'content-type: application/j
 # every data call is scoped to a workspace by the X-Workspace header (omitted = oldest workspace)
 curl -s -X POST localhost:8000/api/v1/admin/jobs -H "Authorization: Bearer $TOKEN" -H 'X-Workspace: synthetic-demo' -H 'content-type: application/json' \
      -d '{"job_type":"seed_demo","params":{"fast":true,"replay_cycles":2}}'
-curl -s localhost:8000/api/v1/admin/jobs -H "Authorization: Bearer $TOKEN" -H 'X-Workspace: synthetic-demo'   # poll: PENDING → RUNNING → SUCCESS
+curl -s localhost:8000/api/v1/admin/jobs -H "Authorization: Bearer $TOKEN" -H 'X-Workspace: synthetic-demo'   # or watch GET /api/v1/events; states: PENDING → RUNNING → SUCCESS
 ```
 
 **Check it worked**
@@ -189,6 +189,8 @@ A **workspace** = one dataset + everything derived from it (mappings, forecast r
 - Technically each workspace is its own **PostgreSQL schema** (`ws_<slug>`); users and the workspace registry are shared. The API selects the schema per request from the `X-Workspace` header. Deleting a workspace is a `DROP SCHEMA`.
 - **Pages adapt to the data.** The workspace reports its *capabilities* (sales, CRM, backlog, capacity, contracts). Missing data switches the dependent feature off with an explanation instead of failing: no CRM → no commercial uplift or pipeline-vulnerability alerts; no backlog → no coverage/revenue-gap alerts; no capacity → no supply-bottleneck alerts; every customer is its own OEM → mapping review stays empty.
 - Workspace types: **Synthetic**, **Custom data**, **M5** (label in the top bar says which).
+- **Navigation.** Only *Workspaces* and *Admin* are global. Opening a workspace shows its own Dashboard, Explorer, Risk, Governance, Mapping and Data pages.
+- **Live updates.** The browser holds one Server-Sent Events connection (`GET /api/v1/events`). Job progress, finished imports/forecasts and workspace changes are pushed to every open tab, so nothing needs a manual refresh. It reconnects automatically and resyncs after a drop. Behind a reverse proxy, disable response buffering for `/api/v1/events`.
 
 ## 📥 Bring your own data
 
@@ -294,7 +296,8 @@ Base `/api/v1` · Bearer JWT · interactive docs at **/docs**. Every endpoint is
 | Mapping | `/mapping/accounts` · `/queue` · `/{id}/review` · `/rules` · `/oems` · `POST /run` · `/restate` |
 | Admin | `/admin/jobs` · `/dq` · `/drift` · `/settings` · `/users` |
 | Workspaces | `GET/POST /workspaces` · `PATCH/DELETE /workspaces/{id}` (scope any other call with header `X-Workspace: <slug>`) |
-| Data | `/data/status` · `/data/upload` · `/data/validate` · `POST /data/import` · `/data/clear` · `/data/templates/{role}` |
+| Data | `/data/status` · `/data/upload` · `/data/fetch` (URL) · `/data/validate` · `POST /data/import` · `/data/clear` · `/data/templates/{role}` · `/data/m5/upload` · `/data/m5/fetch` |
+| Live | `GET /events` — Server-Sent Events (`job`, `data_changed`, `workspaces`, `resync`); Postgres `LISTEN/NOTIFY` underneath |
 
 Typed frontend client: `npm run gen:types` (openapi-typescript) → `frontend/src/lib/api-schema.d.ts`; a hand-maintained mirror lives in `src/lib/types.ts`.
 

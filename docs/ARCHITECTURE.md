@@ -13,17 +13,26 @@ CRM snapshots ─► T2 Commercial: win-prob (LightGBM+isotonic) × slip/delay t
             ─► T5 Risk: Coverage = Backlog / Consensus; supply bottleneck; pipeline concentration
 ```
 
+## Workspaces
+One PostgreSQL schema per workspace (`ws_<slug>`); `users`, `workspaces`, `jobs` live in `public`. A request selects its workspace via `X-Workspace`; the slug is resolved to a schema, a per-schema engine is used with `search_path=ws_x,public`, and a contextvar (`current_schema`) lets services and jobs run unchanged. Data comes from the synthetic generator, an uploaded file/zip/URL (`data/importer.py`) or the M5 preset (`data/m5.py`). A capability map (sales, CRM, backlog, capacity, contracts) drives graceful degradation of engines and UI.
+
+```
+Browser ──REST──► FastAPI ──► Postgres (schema per workspace) ──► Celery worker (jobs)
+   ▲                  │  pg_notify('oem_events')  ◄───────────────────────┘
+   └──── SSE ◄── Hub (LISTEN) ◄────────┘
+```
+
 ## Hierarchy
 Node id `OEM|REGION|PRODUCT`, `ALL` for aggregates. Levels TOTAL, REGION, OEM, PRODUCT, OEM_REGION, BOTTOM. `(oem, ALL, product)` is invalid.
 
 ## Async model
-Every endpoint is `async def`. I/O CRUD uses `AsyncSession` (`in_session`); CPU-bound pandas/numpy work uses `in_thread` with its own sync Session; forecast/seed/mapping rebuilds are jobs (Celery or thread). Auth crypto is off-loop. Services remain plain sync functions shared by workers and tests.
+Every endpoint is `async def`. I/O CRUD uses `AsyncSession` (`in_session`); CPU-bound pandas/numpy work uses `in_thread` with its own sync Session; forecast/seed/import/mapping rebuilds are jobs (Celery or thread) tagged with a workspace id; progress reaches the browser by Server-Sent Events (`/events`, fed by Postgres LISTEN/NOTIFY), not polling. Auth crypto is off-loop. Services remain plain sync functions shared by workers and tests.
 
 ## Governance
 AI baseline immutable; overrides are revisions; deviation > 60% requires a ≥15-char comment; cycle OPEN→FORECASTED→CONSENSUS→LOCKED; lock writes frozen `ConsensusPoint` rows; FVA vs AI and vs naive with bootstrap CI; SHA-256 hash-chained audit log (Postgres advisory lock serialises writers).
 
 ## Data stores
-Postgres + pgvector (embeddings for fuzzy mapping, HNSW index) — the only supported database, including tests; Redis for Celery.
+Postgres + pgvector (embeddings for fuzzy mapping, HNSW index) — the only supported database, including tests; Redis for Celery. Docker: `docker-compose.yml` (production-style images) plus `docker-compose.dev.yml` (bind mounts, hot reload).
 
 ## Frontend
-Next.js 14 App Router, Tailwind, Radix, Recharts, TanStack Query. Types: `frontend/src/lib/types.ts` (hand-mirrored) and `npm run gen:types` (openapi-typescript → `api-schema.d.ts`).
+Next.js 14 App Router; only Workspaces and Admin are global, other pages live inside a workspace; Tailwind, Radix, Recharts, TanStack Query. Types: `frontend/src/lib/types.ts` (hand-mirrored) and `npm run gen:types` (openapi-typescript → `api-schema.d.ts`).

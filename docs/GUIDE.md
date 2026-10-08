@@ -109,7 +109,7 @@ CRM snapshots ─► Commercial engine (win × timing, MC) ─ × β ─► Hybr
 | 8 | **Coverage = Backlog ÷ Consensus** | The draft inverted it; backlog-over-forecast is the standard (≥ 1 means fully covered). |
 | 9 | **Segmentation gives a *prior*; the backtest picks the champion** | Textbook rules (e.g. "use Croston for intermittent") are only hypotheses on *your* data. Prior wins only when models are within 2 %. |
 | 10 | **All endpoints async** | Production requirement: the web edge never blocks on DB or crypto; heavy compute is off the request path. |
-| 11 | **Honesty by design** | UNAVAILABLE models are shown with a reason; backtest-fold caveat is displayed; synthetic banner is permanent. |
+| 11 | **Honesty by design** | UNAVAILABLE models are shown with a reason; backtest-fold caveat is displayed; a banner marks every synthetic workspace. |
 
 ## 4. Data model (35 tables)
 
@@ -314,7 +314,7 @@ Severity by dollar impact: **HIGH ≥ $1M**, **MEDIUM ≥ $250k**. Alerts have s
 - `api/aio.py` gives two bridges:
   - `in_session(db, fn, …)` — runs a **sync service function** inside the async session via `run_sync` (I/O-bound CRUD).
   - `in_thread(fn, …)` — runs CPU-heavy pandas/numpy work (and mutations) in a **worker thread with its own sync Session** so the event loop never blocks.
-- **Heavy jobs** (forecast run, seeding, mapping rebuild, FVA) are *never* in the request path: they become `Job` rows executed by **Celery** (production) or a **job thread** (dev). The UI polls `/admin/jobs`.
+- **Heavy jobs** (forecast run, seeding, mapping rebuild, FVA) are *never* in the request path: they become `Job` rows executed by **Celery** (production) or a **job thread** (dev). The UI does not poll: job state changes are pushed over Server-Sent Events (§25).
 - bcrypt hashing, JWT decoding and JWKS fetching are blocking → off-loaded to threads.
 - Service functions stay **plain sync** and are shared by API, workers and tests. *Why:* pandas/numpy are CPU-bound — making them `async` adds complexity without benefit; threads are the right tool.
 - Startup bootstrap (tables for dev, default settings/rules/thresholds, demo users) runs under a **Postgres advisory lock** so multiple workers can't race (a real bug we hit).
@@ -340,8 +340,8 @@ Severity by dollar impact: **HIGH ≥ $1M**, **MEDIUM ≥ $250k**. Alerts have s
 
 Next.js 14 App Router, TypeScript, Tailwind, Radix Dialog (sheets), Recharts, TanStack Query.
 
-- **Shell:** sidebar, top bar with the **synthetic banner**, run selector (shared via `RunProvider`), cycle status, theme toggle, user menu. Unauthenticated → `/login`. Token in memory with try/catch localStorage persistence; 401 triggers logout.
-- **Pages:** Dashboard, Forecast Explorer (+ Detail slide-over, override form), Benchmark, Risk Center, Governance (overrides/FVA/cycles/audit), Mapping (queue/accounts/rules/OEMs), Admin (jobs/DQ-drift/settings/users).
+- **Shell:** only *Workspaces* and *Admin* are global; every other page lives inside a workspace (sidebar, top bar with workspace switcher, a banner on synthetic workspaces only), run selector (shared via `RunProvider`), cycle status, theme toggle, user menu. Unauthenticated → `/login`. Token in memory with try/catch localStorage persistence; 401 triggers logout.
+- **Pages:** Workspaces (list/create/open), Data (generate · import · M5), Dashboard, Forecast Explorer (+ Detail slide-over, override form), Benchmark, Risk Center, Governance (overrides/FVA/cycles/audit), Mapping (queue/accounts/rules/OEMs), Admin (jobs/DQ-drift/settings/users).
 - **Role-aware UI:** buttons for actions you cannot perform are hidden (server still enforces).
 - **Types:** `lib/types.ts` mirrors Pydantic schemas; `npm run gen:types` generates the authoritative OpenAPI version.
 - **Data-visualisation rules applied** (from the dataviz method): fixed-order categorical palette (never cycled), CSS custom properties with light/dark selection, thin marks, no dual axis, a legend whenever ≥ 2 series, hover tooltip + crosshair, **table view** for every chart, status = icon + text, recessive grid.
@@ -354,7 +354,9 @@ Next.js 14 App Router, TypeScript, Tailwind, Radix Dialog (sheets), Recharts, Ta
 - **Healthcheck:** `/api/v1/health`.
 - **Alembic:** baseline migration creates tables, the `vector` extension and HNSW indexes. In dev (`ENVIRONMENT != prod`) tables are also created at startup for convenience.
 - **CI** (`.github/workflows/ci.yml`): ruff, unit tests, Postgres tests (service container), e2e, frontend typecheck/lint/build.
-- **Makefile:** `setup, api, web, test-fast, test-e2e, types, build, up, down`.
+- **Makefile:** `setup, api, web, test-db, test-fast, test-e2e, types, build, docker-up|down|restart|reset|backend|web|logs|ps, dev-up|dev-down|dev-logs`.
+- **Dev loop without rebuilds:** `docker-compose.dev.yml` bind-mounts `backend/app`, runs `uvicorn --reload` and `watchfiles` for the Celery worker, and a Next dev server in a Node container (`make dev-up`). Rebuild images only for dependency changes (`pyproject.toml` → `make docker-backend`) and production checks.
+- **Tests need Postgres:** `make test-db` starts a throwaway pgvector container on port 5544; tests use schema `ws_test`.
 - **Operational notes:** change `JWT_SECRET`; the DB (not code) holds settings; a locked cycle is frozen; to re-seed use Admin → Jobs (wipes domain data, keeps users and jobs).
 
 ## 19. Testing — what exists, what it proved
@@ -423,7 +425,7 @@ Current: 57 passed (unit + e2e + OIDC) + 2 Postgres; frontend `tsc`/`next build`
 | See if overrides help | Governance → FVA (needs matured, locked cycles) |
 | Add a forecasting model | Implement `BaseForecastModel` in `ml/models/`, register in `registry.py::model_catalog` |
 | Enable TiRex | `ENABLE_TIREX=true` + install extra `tirex` **after licence review** |
-| Use real data | Replace the loader: write ERP/CRM rows into the fact tables (same schema), set `SYNTHETIC_MODE=false`, run `mapping_pipeline` → `run_forecast` |
+| Use real data | Workspaces → New workspace → *Your own data* → Data → upload file/zip/URL → map columns → Import (§25). No code changes needed. |
 | Regenerate API types | `cd frontend && npm run gen:types` |
 | Verify audit integrity | Governance → Audit log (badge) or `GET /api/v1/audit/verify` |
 
@@ -431,9 +433,9 @@ Current: 57 passed (unit + e2e + OIDC) + 2 Postgres; frontend `tsc`/`next build`
 
 ```
 backend/app/
-  core/        config · db (sync+async engines, EmbeddingType) · security · audit · settings_store · calendar
+  core/        config · db (per-schema engines, current_schema contextvar) · workspace · events (LISTEN/NOTIFY hub) · security · audit · settings_store · calendar
   models/      reference · facts · forecast · governance · ops   (35 tables)
-  data/        synthetic · loader · seed
+  data/        synthetic · loader · seed · importer · m5
   mapping/     normalize · embeddings · vector_store · rules · fuzzy · service
   ml/          base · metrics · segmentation · backtest · hierarchy · reconcile · asp · commercial
   ml/models/   stats · lgbm · foundation · registry
@@ -443,13 +445,14 @@ backend/app/
   quality/     checks · drift
   tasks/       jobs · celery_app
   schemas/     common · forecast · risk · mapping · admin
-  api/         aio · deps · auth · forecast · governance · risk · mapping · admin
-  main.py      app factory, lifespan bootstrap, /metrics
+  api/         aio · deps · auth · forecast · governance · risk · mapping · admin · workspaces · data · events
+  cli.py       seed · import-m5 · workspaces
+  main.py      app factory, lifespan bootstrap (starts the events hub), /metrics
 backend/alembic/   env · versions/0001_initial
 backend/tests/     (see §19)
-frontend/src/app/  login · (app)/{dashboard,explorer,benchmark,risk,governance,mapping,admin}
+frontend/src/app/  login · (app)/{workspaces,data,dashboard,explorer,benchmark,risk,governance,mapping,admin}
 frontend/src/components/  ui/index.tsx · charts/{FanChart,Bars} · shell.tsx
-frontend/src/lib/  api · auth · run-context · types · utils
+frontend/src/lib/  api · auth · events (SSE client) · workspace-context · run-context · types · utils
 docs/              GUIDE.md · ARCHITECTURE.md · screenshots/
 MASTER.md          working log & verification status
 ```
@@ -493,6 +496,14 @@ MASTER.md          working log & verification status
 
 **Import (`app/data/importer.py`).** Required: month, customer, product, units, and revenue-or-price. Optional: region, OEM, family, a customer→OEM mapping file, backlog, capacity. Steps: read → canonicalise (dates to month starts; sub-monthly data aggregated, a partial last month dropped) → validate (≥18 months, series ≤ 600, numeric checks) → wipe the workspace → write reference data, accounts and 100 % mappings (or the supplied allocations) → `materialize_mapped_series` → DQ → optional first forecast. USD only for now (a `USD` FX row per month is created).
 **M5 preset (`app/data/m5.py`).** Store → OEM, state → region, department → product; revenue = units × weekly price; processed store by store to keep memory flat.
+
+**Bring data in: file, zip or URL.** `/data/upload` accepts CSV/TSV/Parquet or a zip (the largest csv/tsv/parquet inside is used; names are flattened, so path traversal is impossible). `/data/fetch` downloads a public http(s) URL server-side: private, loopback, link-local and reserved addresses are refused, redirects are followed manually with the check repeated per hop, and the size cap is 800 MB. Uploaded files land in `data/import/<workspace>/` (mounted into the api and worker containers) so the import job can read them.
+
+**M5 from the UI.** `/data/m5/upload` takes the Kaggle zip or the three CSVs (only `calendar.csv`, `sales_train_evaluation.csv`/`validation`, `sell_prices.csv` are extracted); `/data/m5/fetch` takes a URL. The page ticks each file as it arrives, then *Load M5 and forecast* starts the job. The workspace must be of kind `m5`.
+
+**Live updates (SSE).** Why not polling: every open tab would hit the API on a timer and still lag behind. Instead the API pushes. Writers call `pg_notify('oem_events', json)` inside their transaction (delivered on commit). Each API process runs one listener (`core/events.py`, a psycopg `LISTEN` connection with reconnect) that fans events to subscribers of `GET /api/v1/events` (`StreamingResponse`, keep-alive comment every 15 s, `retry: 3000`). Event types: `job` (progress/state), `data_changed` (carries the schema, so only the matching workspace refetches), `workspaces` (registry changed), `resync` (after a listener reconnect: refetch everything). The browser uses a fetch-based client (`lib/events.ts`) rather than `EventSource`, because the JWT travels in the `Authorization` header, not in a URL. `workspace-context.tsx` turns events into TanStack Query invalidations. A reverse proxy must not buffer the stream (`X-Accel-Buffering: no` is set).
+
+**Working on the code.** `make dev-up` runs the stack with hot reload (no image rebuilds); see the README dev loop. Because the schema layout changed, an old database from before workspaces needs `make docker-reset` (drops volumes). Adding a table later requires a per-workspace migration (use `workspaces.schema_version`); new workspaces pick up new tables automatically, existing ones do not.
 
 **Limits worth knowing.** Importing replaces a workspace's data (no merge/append yet). CRM opportunity files cannot be imported (their point-in-time snapshots need a richer wizard); CRM stays a synthetic-workspace feature for now. Mixed currencies need conversion before upload. A customer split across OEMs is only supported through the mapping file.
 
