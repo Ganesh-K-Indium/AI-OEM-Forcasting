@@ -41,15 +41,25 @@ A components supplier sells to a handful of OEMs (Apple, Bosch, …) — partly 
 
 ## 🚀 Quickstart
 
+### Prerequisites
+
+| For | You need |
+|---|---|
+| **Docker path** (recommended) | Docker Desktop / Engine with Compose v2. Give Docker **≥ 6 GB RAM** for the full (Chronos-2) image; the lean image needs far less. Internet access on first build (and, for Chronos-2, on first use to download the model weights). |
+| **Local path** | Python **3.13** (3.11+ may work; 3.14 lacks wheels for parts of the ML stack), Node **20+**, `make`. |
+
 ### Option A — Docker (recommended)
 
 ```bash
-cp .env.example .env                     # set JWT_SECRET
-# lean image (no torch, Chronos-2 shows as UNAVAILABLE) — fastest to build:
+git clone <this repo> && cd <this repo>
+cp .env.example .env                     # then set JWT_SECRET to a long random string
+# lean image (no torch; Chronos-2 shows as UNAVAILABLE) — fastest build:
 WITH_FOUNDATION=0 ENABLE_CHRONOS=false docker compose up --build
-# full image (torch + Chronos-2, larger/slower build):
+# full image (torch + Chronos-2) — bigger, slower build:
 docker compose up --build
 ```
+
+Wait until `docker compose ps` shows every service `healthy`/`Up` (API takes ~30 s after start: it applies the database migration, then serves).
 
 | Service | URL |
 |---|---|
@@ -57,28 +67,70 @@ docker compose up --build
 | API + Swagger docs | http://localhost:8000/docs |
 | Prometheus metrics | http://localhost:8000/metrics |
 
-**First run — seed the demo (≈2–3 min, fast mode):**
-
-1. Open http://localhost:3000 and sign in as **`admin@demo.local` / `demo1234`**
-2. **Admin → Jobs** → choose `seed_demo`, keep **fast** ticked → **Run**
-3. Watch the progress bar; when it reads `SUCCESS`, open **Executive Dashboard**
-
-> Want the *full* model zoo (Chronos-2, ARIMA…)? Run job `run_forecast` with **fast unticked**. Several minutes on CPU.
+> The browser talks to the API at `PUBLIC_API_URL` (default `http://localhost:8000`), which is **baked into the frontend at build time** — change it in `.env` and rebuild if you deploy on another host.
 
 ### Option B — local dev (SQLite, no Docker)
 
 ```bash
-make setup           # python 3.13 venv + deps, npm install
-make api             # http://localhost:8000/docs      (terminal 1)
-make web             # http://localhost:3000           (terminal 2)
+make setup           # python venv + deps (incl. torch/Chronos), npm install
+make api             # terminal 1 → http://localhost:8000/docs   (SQLite file at backend/data/oem.db)
+make web             # terminal 2 → http://localhost:3000
 ```
-Then seed from **Admin → Jobs** exactly as above. Jobs run in a background thread when Celery is off.
+Jobs run in a background thread when Celery is off, so no Redis is needed locally.
+
+### 🌱 Seed the synthetic demo data (required on first run)
+
+A fresh install is **empty** — the dashboard says "No forecast run yet" until you seed. Seeding generates a deterministic synthetic company, maps it to OEMs, replays past planning cycles (so FVA has history), forecasts the current cycle and computes risk.
+
+**What it creates** (same every time, `seed=42`): ~87 ERP accounts (direct, distributors, look-alike decoys) · 36 months of history for ~120 OEM×Region×Product series · ~2,400 CRM opportunities with monthly snapshots · backlog, capacity, contracts, FX · simulated rep overrides in the past cycles · a current-cycle forecast with risk alerts. Currency USD, units in kunits.
+
+**Way 1 — in the UI** (works for Docker and local):
+1. Open http://localhost:3000 → click the **Admin** role card (`admin@demo.local` / `demo1234`) → **Sign in**
+2. **Admin → Jobs** → job type **`seed_demo`**, leave **fast** ticked → **Run**
+3. Watch the progress bar and message (*Generating… → Mapping… → Forecast cycles… → Risk…*). **Fast mode takes ≈ 2–3 minutes** (full mode ≈ 10+ min). When the state reads **SUCCESS**, open **Executive Dashboard**.
+
+**Way 2 — command line, no server** (local path; writes to the same SQLite DB):
+```bash
+cd backend && . .venv/bin/activate
+PYTHONPATH=. python -m app.cli seed                 # fast (≈2–3 min)
+PYTHONPATH=. python -m app.cli seed --full          # full model zoo, 6 replay cycles (slow)
+```
+Inside Docker: `docker compose exec api python -m app.cli seed`
+
+**Way 3 — HTTP API** (scripts/CI):
+```bash
+TOKEN=$(curl -s localhost:8000/api/v1/auth/login -H 'content-type: application/json' \
+        -d '{"email":"admin@demo.local","password":"demo1234"}' | python3 -c 'import sys,json;print(json.load(sys.stdin)["access_token"])')
+curl -s -X POST localhost:8000/api/v1/admin/jobs -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+     -d '{"job_type":"seed_demo","params":{"fast":true,"replay_cycles":2}}'
+curl -s localhost:8000/api/v1/admin/jobs -H "Authorization: Bearer $TOKEN"     # poll: state PENDING → RUNNING → SUCCESS
+```
+
+**Check it worked**
+- Admin → Jobs shows `seed_demo` = **SUCCESS**; the top bar run selector shows a `CURRENT` run for *Sep 26*.
+- Dashboard shows roughly **$490 M** consensus revenue over 12 months, a few dozen risk alerts, and 5 OEMs (APPLE, BOSCH, DELL, SIEMENS, TOYOTA) in the Explorer filters.
+- Mapping → Review queue holds a few fuzzy matches for you to approve (the look-alike decoys are deliberately *not* auto-merged).
+- `curl localhost:8000/api/v1/meta` returns a non-null `current_run_id`.
+
+**Notes**
+- **Re-seeding** wipes and regenerates all domain data (but keeps users and job history) — run it again any time to reset the demo.
+- **Fast vs full:** fast uses Naive, SeasonalNaive, AutoETS, Croston-SBA, TSB and LightGBM. For the whole zoo (adds AutoARIMA, **Chronos-2**, Ensemble) run **`run_forecast`** with *fast* unticked after seeding, or `seed --full`. Chronos-2 needs the full Docker image (or `make setup`, which installs torch) and downloads weights on first use.
+- Only **admin** can run `seed_demo`; planners can run `run_forecast`.
+- Seeding is CPU-bound; on a laptop the progress bar can sit on "Backtesting" for a minute — that is normal.
+- If the job **FAILS**, expand the error in Admin → Jobs; common causes are listed under [Troubleshooting](#-troubleshooting).
 
 <p align="center"><img src="docs/screenshots/login.png" alt="Login landing page" width="860"/></p>
 
 ### Demo users (password `demo1234`)
 
 `admin@` · `planner@` · `steward@` · `viewer@` · `rep.amer@` · `rep.emea@` · `rep.apac@` — all `@demo.local`. The landing page has one-click role cards (Planner, Admin, Steward, Viewer, three scoped Reps).
+
+### Stop / reset
+
+```bash
+docker compose down        # stop, keep data (Postgres volume survives)
+docker compose down -v     # stop AND delete all data (fresh install; re-seed afterwards)
+```
 
 ## 🧭 Product tour
 
@@ -212,7 +264,10 @@ Build status: unit + e2e + OIDC (mock IdP) + Postgres tests pass; frontend `tsc`
 
 | Symptom | Fix |
 |---|---|
-| Dashboard says "No forecast run yet" | Seed it: **Admin → Jobs → seed_demo** |
+| Dashboard says "No forecast run yet" | Seed it (see [Seed the synthetic demo data](#-seed-the-synthetic-demo-data-required-on-first-run)) |
+| `seed_demo` job FAILED | Open the error in Admin → Jobs; check `docker compose logs worker`; make sure the worker container is running (with `USE_CELERY=true` jobs run *only* in the worker) |
+| Job stays PENDING forever | Worker not running / Redis unreachable: `docker compose ps`, `docker compose logs worker` |
+| Login page shows an error / network failure | API not up yet (wait for `healthy`) or `PUBLIC_API_URL` wrong for your host |
 | API container `unhealthy` | `docker compose logs api`; healthcheck is `/api/v1/health` |
 | `Chronos-2 UNAVAILABLE` in Benchmark | Lean image or `ENABLE_CHRONOS=false`; rebuild without `WITH_FOUNDATION=0` |
 | Tests can't reach Postgres on `localhost:5432` | A local Postgres is shadowing the container port — use another host port |
