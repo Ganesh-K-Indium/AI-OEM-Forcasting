@@ -1,0 +1,49 @@
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# --- secrets / env ---
+.env
+.env.*
+!.env.example
+
+# --- Python (backend) ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+build/
+dist/
+
+# --- runtime data / artifacts (SQLite DB, model artifacts, HF cache) ---
+backend/data/
+*.db
+*.sqlite3
+*.parquet
+*.duckdb
+*.ckpt
+*.safetensors
+
+# --- Node / Next.js (frontend) ---
+node_modules/
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+npm-debug.log*
+# generated OpenAPI types are reproducible via `npm run gen:types`; keep the hand-written types.ts
+frontend/src/lib/api-schema.d.ts
+
+# --- Docker / local ---
+docker-compose.override.yml
+*.log

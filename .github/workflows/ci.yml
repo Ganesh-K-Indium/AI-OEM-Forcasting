@@ -1,0 +1,36 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env: { POSTGRES_USER: oem, POSTGRES_PASSWORD: oem, POSTGRES_DB: oem }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U oem" --health-interval 5s --health-timeout 3s --health-retries 10
+    defaults: { run: { working-directory: backend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", cache: pip }
+      - run: pip install -e ".[dev]"
+      - run: ruff check app tests
+      - run: pytest -q -m "not slow and not postgres"
+        env: { PYTHONPATH: . }
+      - run: pytest -q -m postgres
+        env: { PYTHONPATH: ., TEST_POSTGRES_URL: "postgresql+psycopg://oem:oem@localhost:5432/oem" }
+      - run: pytest -q -m slow tests/test_e2e_api.py
+        env: { PYTHONPATH: . }
+  frontend:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: frontend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm, cache-dependency-path: frontend/package-lock.json }
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run build

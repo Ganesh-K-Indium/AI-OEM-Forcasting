@@ -1,0 +1,41 @@
+# Local/production-like stack:  docker compose up --build
+# First run: sign in as admin@demo.local / demo1234 → Admin → Jobs → seed_demo.
+x-backend-env: &backend-env
+  DATABASE_URL: postgresql+psycopg://oem:oem@postgres:5432/oem
+  REDIS_URL: redis://redis:6379/0
+  USE_CELERY: "true"
+  ENVIRONMENT: ${ENVIRONMENT:-dev}
+  JWT_SECRET: ${JWT_SECRET:-change-me-in-production-please-32+chars}
+  CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+  SYNTHETIC_MODE: ${SYNTHETIC_MODE:-true}
+  ENABLE_CHRONOS: ${ENABLE_CHRONOS:-true}
+  ENABLE_TIREX: ${ENABLE_TIREX:-false}
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment: { POSTGRES_USER: oem, POSTGRES_PASSWORD: oem, POSTGRES_DB: oem }
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U oem"], interval: 5s, timeout: 3s, retries: 10 }
+    ports: ["5432:5432"]
+  redis:
+    image: redis:7-alpine
+    healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 5s, timeout: 3s, retries: 10 }
+  api:
+    build: { context: ./backend, args: { WITH_FOUNDATION: "${WITH_FOUNDATION:-1}" } }
+    environment: *backend-env
+    depends_on: { postgres: { condition: service_healthy }, redis: { condition: service_healthy } }
+    volumes: [artifacts:/app/data]
+    ports: ["8000:8000"]
+  worker:
+    build: { context: ./backend, args: { WITH_FOUNDATION: "${WITH_FOUNDATION:-1}" } }
+    command: ["celery", "-A", "app.tasks.celery_app.celery_app", "worker", "--loglevel=INFO", "--concurrency=2"]
+    environment: *backend-env
+    depends_on: { api: { condition: service_healthy } }
+    volumes: [artifacts:/app/data]
+  frontend:
+    build: { context: ./frontend, args: { NEXT_PUBLIC_API_URL: "${PUBLIC_API_URL:-http://localhost:8000}" } }
+    depends_on: [api]
+    ports: ["3000:3000"]
+
+volumes: { pgdata: {}, artifacts: {} }
