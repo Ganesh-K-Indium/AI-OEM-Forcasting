@@ -20,4 +20,6 @@ export const fmtMonth = (s: string) => {
   const d = new Date(s + "T00:00:00");
   return d.toLocaleDateString(undefined, { month: "short", year: "2-digit" });
 };
-export const fmtTs = (s: string) => new Date(s).toLocaleString();
+/** The API sends UTC timestamps without a zone suffix; without "Z" the browser would read them as local time. */
+export const parseTs = (s: string) => new Date(/(Z|[+-]\d\d:?\d\d)$/.test(s) ? s : `${s}Z`);
+export const fmtTs = (s: string) => parseTs(s).toLocaleString();

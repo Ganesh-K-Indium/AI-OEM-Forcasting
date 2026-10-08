@@ -7,7 +7,7 @@ import { get, post } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace-context";
 import type { Capabilities, Job } from "@/lib/types";
 import { Badge, Button, Card, CardHeader, Empty, ErrorBox, Label, Select, Spinner } from "@/components/ui";
-import { cn, fmtTs } from "@/lib/utils";
+import { cn, fmtTs, parseTs } from "@/lib/utils";
 
 type Opt = { key: string; label: string; kind: "select" | "number" | "check"; choices?: { v: string; l: string }[]; def: string | number | boolean; help?: string };
 interface Action {
@@ -49,9 +49,9 @@ const ACTIVE = (s: string) => s === "PENDING" || s === "RUNNING";
 const tone = (s: string) => (s === "SUCCESS" ? "good" : s === "FAILED" ? "crit" : s === "RUNNING" ? "info" : "neutral") as "good" | "crit" | "info" | "neutral";
 
 function dur(j: Job, now: number) {
-  const start = j.started_at ? new Date(j.started_at).getTime() : null;
+  const start = j.started_at ? parseTs(j.started_at).getTime() : null;
   if (!start) return ACTIVE(j.state) ? "queued" : "—";
-  const sec = Math.max(0, Math.round(((j.finished_at ? new Date(j.finished_at).getTime() : now) - start) / 1000));
+  const sec = Math.max(0, Math.round(((j.finished_at ? parseTs(j.finished_at).getTime() : now) - start) / 1000));
   return sec < 60 ? `${sec}s` : `${Math.floor(sec / 60)}m ${sec % 60}s`;
 }
 function summary(j: Job): string {

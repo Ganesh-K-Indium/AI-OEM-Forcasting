@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import time
 import threading
 import traceback
 import uuid
@@ -66,7 +67,11 @@ def execute_job(job_id: str) -> None:
 def _execute(job_id: str, jt: str, params: dict, user: str, ws_id: str | None) -> None:
     _update(job_id, state="RUNNING", started_at=datetime.utcnow(), progress=0.01, message="started")
 
+    t0 = time.time()
+    log.info("job %s [%s] started params=%s", job_id[:8], jt, params)
+
     def progress(frac: float, msg: str) -> None:
+        log.info("job %s [%s] %3.0f%% %s (+%ds)", job_id[:8], jt, frac * 100, msg, time.time() - t0)
         _update(job_id, progress=float(min(frac, 0.99)), message=msg)
 
     try:
@@ -77,6 +82,7 @@ def _execute(job_id: str, jt: str, params: dict, user: str, ws_id: str | None) -
             from app.core.workspace import refresh_capabilities
 
             refresh_capabilities(current_schema.get(), ws_id)
+        log.info("job %s [%s] finished in %ds", job_id[:8], jt, time.time() - t0)
         _update(job_id, state="SUCCESS", progress=1.0, message="done", result=result, finished_at=datetime.utcnow())
     except Exception as e:  # noqa: BLE001
         log.exception("job %s failed", job_id)

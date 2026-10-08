@@ -137,7 +137,8 @@ def _run(session: Session, run: ForecastRun, cycle_month: date, kind: str, mode:
     catalog = model_catalog(H)
     avail = {k: v[1].is_available() for k, v in catalog.items()}
     names = [n for n in catalog if mode == "full" or n in FAST_MODELS]
-    bt = bt_mod.run_backtest(long, {n: catalog[n][0] for n in names}, horizon=H, availability=avail)
+    bt = bt_mod.run_backtest(long, {n: catalog[n][0] for n in names}, horizon=H, availability=avail,
+                         on_step=lambda f, m: pg(0.10 + 0.35 * f, m))
     bt = bt_mod.add_ensemble(bt)
     by_h, by_b = bt_mod.score_backtest(bt, segs)
     champs = bt_mod.select_champions(by_b, SEGMENT_PRIORS, float(get_setting(session, "champion_prior_tolerance")))

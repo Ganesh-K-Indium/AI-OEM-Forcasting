@@ -37,19 +37,23 @@ class BacktestResult:
 
 
 def run_backtest(long_df: pd.DataFrame, factories: dict[str, ModelFactory], horizon: int = 12, min_train: int = 18, step: int = 3,
-                 availability: dict[str, tuple[bool, str]] | None = None) -> BacktestResult:
+                 availability: dict[str, tuple[bool, str]] | None = None, on_step=None) -> BacktestResult:
     """long_df: [unique_id, ds, y] on a common monthly index (months with no sales must be explicit zeros)."""
     dates = np.sort(long_df["ds"].unique())
     T = len(dates)
     origins = rolling_origins(T, min_train, step)
     piv = long_df.pivot(index="ds", columns="unique_id", values="y").loc[dates]
     rows, status, timings = [], {}, {}
+    total, done = max(1, len(factories) * len(origins)), 0
     for name, fac in factories.items():
         if availability and not availability.get(name, (True, ""))[0]:
             status[name] = ("UNAVAILABLE", availability[name][1])
             continue
         t0, ok_any, err = time.time(), False, ""
-        for o in origins:
+        for k, o in enumerate(origins):
+            if on_step:
+                on_step(done / total, f"Backtesting {name} (origin {k + 1}/{len(origins)})")
+            done += 1
             tr = long_df[long_df["ds"] < dates[o]]
             h = min(horizon, T - o)
             try:
@@ -72,6 +76,7 @@ def run_backtest(long_df: pd.DataFrame, factories: dict[str, ModelFactory], hori
             continue
         status[name] = ("OK", "") if ok_any else ("FAILED", err)
         timings[name] = time.time() - t0
+        log.info("backtest %s: %s in %.0fs", name, status[name][0], timings[name])
     if not rows:
         raise RuntimeError("no model produced backtest forecasts")
     bt = pd.concat(rows, ignore_index=True)
