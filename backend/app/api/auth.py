@@ -20,8 +20,9 @@ async def login(body: LoginIn, db: AsyncSession = Depends(get_adb)):
     ok = await anyio.to_thread.run_sync(verify_password, body.password, u.password_hash if u else "$2b$10$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalidi")  # constant-ish time
     if u is None or not ok:
         raise HTTPException(401, "Invalid credentials")
-    await db.run_sync(lambda s: audit(s, u.email, "LOGIN", "user", u.email))
-    await db.commit()
+    if db.info.get("workspace") is not None:  # the audit chain is per workspace
+        await db.run_sync(lambda s: audit(s, u.email, "LOGIN", "user", u.email))
+        await db.commit()
     return TokenOut(access_token=create_token(u), user=UserOut.model_validate(u))
 
 

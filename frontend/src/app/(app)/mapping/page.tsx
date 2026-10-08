@@ -4,7 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { del, get, post, put } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import type { Account, Allocation, Candidate, Oem, Rule } from "@/lib/types";
-import { Badge, Button, Card, CardHeader, Empty, ErrorBox, Input, Label, PageHeader, Select, Sheet, Spinner, Table, Tabs, Td, Th } from "@/components/ui";
+import { useRun } from "@/lib/run-context";
+import { Badge, Button, CapabilityNote, Card, CardHeader, Empty, ErrorBox, Input, Label, PageHeader, Select, Sheet, Spinner, Table, Tabs, Td, Th } from "@/components/ui";
 import { fmtPct } from "@/lib/utils";
 
 const RULE_TYPES = ["GLOBAL_DUNS", "DUNS_EXACT", "TAX_ID", "ERP_PARENT", "DOMAIN", "ALIAS_EXACT", "NAME_REGEX"];
@@ -138,6 +139,7 @@ function Oems({ canEdit, oems }: { canEdit: boolean; oems: Oem[] }) {
 }
 
 export default function MappingPage() {
+  const { meta } = useRun();
   const { can } = useAuth(); const qc = useQueryClient();
   const canEdit = can("steward");
   const [tab, setTab] = useState<"queue" | "accounts" | "rules" | "oems">("queue");
@@ -145,6 +147,11 @@ export default function MappingPage() {
   const job = useMutation({ mutationFn: (k: "run" | "restate") => post(`/mapping/${k}`), onSuccess: () => qc.invalidateQueries({ queryKey: ["jobs"] }) });
   return (
     <div>
+      {meta?.capabilities && meta.capabilities.accounts > 0 && meta.capabilities.accounts <= meta.capabilities.oems && (
+        <CapabilityNote title="Every customer in this dataset is its own OEM">
+          There are no distributors to resolve, so the review queue stays empty. Upload a customer → OEM mapping file on the Data page if some customers are distributors.
+        </CapabilityNote>
+      )}
       <PageHeader title="Mapping" sub="Sold-To → End Customer → OEM, effective-dated; steward-approved"
         right={canEdit && <><Button variant="outline" disabled={job.isPending} onClick={() => job.mutate("run")}>Run mapping</Button><Button variant="outline" disabled={job.isPending} onClick={() => job.mutate("restate")}>Restate history</Button></>} />
       {job.isSuccess && <div role="status" className="mb-3 rounded border border-good/40 bg-good/10 p-2 text-sm">Job submitted — track progress in Admin → Jobs.</div>}

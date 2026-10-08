@@ -30,8 +30,8 @@ export default function DashboardPage() {
         <Kpi label="Total Consensus Revenue" value={fmtUsd(k.total_consensus_revenue)} sub={k.consensus_vs_ai_pct != null ? `${k.consensus_vs_ai_pct >= 0 ? "+" : ""}${fmtPct(k.consensus_vs_ai_pct)} vs AI` : undefined} />
         <Kpi label="AI Forecast vs Actual" value={d.ai_vs_actual?.variance_pct != null ? `${d.ai_vs_actual.variance_pct >= 0 ? "+" : ""}${fmtPct(d.ai_vs_actual.variance_pct)}` : "—"}
           sub={d.ai_vs_actual ? `${fmtUsd(d.ai_vs_actual.ai_revenue)} vs ${fmtUsd(d.ai_vs_actual.actual_revenue)} (last ${d.ai_vs_actual.months.length} mo, h=1)` : "Needs a matured frozen forecast"} />
-        <Kpi label="Backlog Coverage (next 3 mo)" value={<span className="flex items-center gap-2">{fmtPct(cov)}<Badge tone={covTone}>{covTone === "good" ? "OK" : covTone === "warn" ? "Watch" : covTone === "crit" ? "Low" : "n/a"}</Badge></span>} sub={`${fmtUsd(k.backlog_value_t3)} backlog / ${fmtUsd(k.forecast_value_t3)} consensus`} />
-        <Kpi label="Revenue at Risk" value={fmtUsd(k.revenue_at_risk)} sub={`+ ${fmtUsd(k.pipeline_at_risk)} pipeline-vulnerable uplift`} />
+        <Kpi label="Backlog Coverage (next 3 mo)" value={<span className="flex items-center gap-2">{fmtPct(cov)}<Badge tone={covTone}>{covTone === "good" ? "OK" : covTone === "warn" ? "Watch" : covTone === "crit" ? "Low" : "n/a"}</Badge></span>} sub={meta?.capabilities?.has_backlog === false ? "No backlog data in this workspace" : `${fmtUsd(k.backlog_value_t3)} backlog / ${fmtUsd(k.forecast_value_t3)} consensus`} />
+        <Kpi label="Revenue at Risk" value={fmtUsd(k.revenue_at_risk)} sub={meta?.capabilities?.has_crm === false ? "Needs backlog / capacity data" : `+ ${fmtUsd(k.pipeline_at_risk)} pipeline-vulnerable uplift`} />
         <Kpi label="Upside Potential (P90)" value={fmtUsd(k.upside_potential)} sub="P90 minus consensus" />
         <Kpi label="Overall wMAPE" value={fmtPct(k.overall_wmape_realized ?? k.backtest_wmape)} sub={k.overall_wmape_realized != null ? "Realised (frozen forecasts)" : "Backtest champion (pooled)"} />
       </div>

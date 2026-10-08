@@ -4,16 +4,17 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { get, post, put } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useRun } from "@/lib/run-context";
+import { useWorkspace } from "@/lib/workspace-context";
 import type { Dq, Drift, Job, Setting, User } from "@/lib/types";
 import { Badge, Button, Card, CardHeader, Empty, ErrorBox, Input, Label, PageHeader, Select, Spinner, Table, Tabs, Td, Th } from "@/components/ui";
 import { fmtNum, fmtTs } from "@/lib/utils";
 
-const JOB_TYPES = ["seed_demo", "run_forecast", "mapping_pipeline", "materialize", "refresh_risk", "compute_fva", "run_dq"];
+const JOB_TYPES = ["seed_demo", "import_dataset", "run_forecast", "mapping_pipeline", "materialize", "refresh_risk", "compute_fva", "run_dq"];
 const jobTone = (s: string) => (s === "SUCCESS" ? "good" : s === "FAILED" ? "crit" : s === "RUNNING" ? "info" : "neutral") as "good" | "crit" | "info" | "neutral";
 
 function Jobs() {
-  const { can } = useAuth(); const qc = useQueryClient(); const { runId } = useRun();
-  const q = useQuery({ queryKey: ["jobs"], queryFn: () => get<Job[]>("/admin/jobs"), refetchInterval: (query) => ((query.state.data as Job[] | undefined)?.some((j) => j.state === "PENDING" || j.state === "RUNNING") ? 2000 : 15000) });
+  const { can } = useAuth(); const qc = useQueryClient(); const { runId } = useRun(); const { current } = useWorkspace(); const seedable = current?.kind === "synthetic";
+  const q = useQuery({ queryKey: ["jobs"], queryFn: () => get<Job[]>("/admin/jobs"), refetchInterval: 30_000 });
   const [type, setType] = useState("run_forecast"); const [fast, setFast] = useState(true);
   const m = useMutation({
     mutationFn: () => post<Job>("/admin/jobs", { job_type: type, params: type === "seed_demo" ? { fast, replay_cycles: fast ? 2 : 6 } : type === "run_forecast" ? { mode: fast ? "fast" : "full" } : {} }),
@@ -23,7 +24,7 @@ function Jobs() {
   return (
     <Card>
       <CardHeader title="Jobs" sub="Long-running work executes off the request path (Celery worker or job thread)."
-        right={can("planner") && <div className="flex items-center gap-2"><Select aria-label="Job type" value={type} onChange={(e) => setType(e.target.value)} disabled={!can("admin") && type === "seed_demo"}>{JOB_TYPES.filter((t) => can("admin") || t !== "seed_demo").map((t) => <option key={t}>{t}</option>)}</Select>
+        right={can("planner") && <div className="flex items-center gap-2"><Select aria-label="Job type" value={type} onChange={(e) => setType(e.target.value)} >{JOB_TYPES.filter((t) => t !== "import_dataset" && (t !== "seed_demo" || (can("admin") && seedable))).map((t) => <option key={t}>{t}</option>)}</Select>
           <label className="flex items-center gap-1 text-xs"><input type="checkbox" checked={fast} onChange={(e) => setFast(e.target.checked)} />fast</label>
           <Button disabled={m.isPending} onClick={() => m.mutate()}>Run</Button></div>} />
       {m.error && <div role="alert" className="p-3 text-sm text-crit">{(m.error as Error).message}</div>}
@@ -106,12 +107,12 @@ function Users() {
 }
 
 export default function AdminPage() {
-  const { can } = useAuth();
+  const { can } = useAuth(); const { current } = useWorkspace();
   const [tab, setTab] = useState<"jobs" | "quality" | "settings" | "users">("jobs");
   const tabs = [{ id: "jobs" as const, label: "Jobs" }, { id: "quality" as const, label: "Data quality & drift" }, { id: "settings" as const, label: "Settings" }, ...(can("admin") ? [{ id: "users" as const, label: "Users" }] : [])];
   return (
     <div>
-      <PageHeader title="Admin" sub="Operations, data quality, configuration" />
+      <PageHeader title="Admin" sub={<>Users are platform-wide. Jobs, data quality, drift and settings apply to the workspace <b>{current?.name ?? "—"}</b> (switch it on the Workspaces page).</>} />
       <div className="mb-4"><Tabs value={tab} onChange={setTab} tabs={tabs} /></div>
       {tab === "jobs" && <Jobs />}{tab === "quality" && <Quality />}{tab === "settings" && <Settings />}{tab === "users" && <Users />}
     </div>

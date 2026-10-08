@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import require_workspace
 from app.api.aio import UserCtx, in_session, in_thread
 from app.api.deps import run_or_404
 from app.core.audit import audit
@@ -15,7 +16,7 @@ from app.models.ops import User
 from app.risk.engine import coverage_table, refresh_alerts, seed_default_thresholds
 from app.schemas.risk import AlertOut, AlertPatch, RiskSummary, ThresholdIn, ThresholdOut
 
-router = APIRouter(prefix="/risk", tags=["risk"], dependencies=[Depends(current_user)])
+router = APIRouter(prefix="/risk", tags=["risk"], dependencies=[Depends(current_user), Depends(require_workspace)])
 
 
 def _alert(a: RiskAlert) -> AlertOut:

@@ -270,3 +270,14 @@ def estimate_net_factor(crm: CrmData, bottoms: list[str], champ_bt: pd.DataFrame
     return {"beta": {int(k): float(v) for k, v in beta.items()}, "n": int(len(d)), "improvement": float(improvement),
             "wmape_baseline": base_err / max(float(d.y.abs().sum()), 1e-9), "wmape_hybrid": hyb_err / max(float(d.y.abs().sum()), 1e-9),
             "note": "ok" if improvement > 0 else "uplift did not improve backtest accuracy -> net factor set to 0"}
+
+
+def no_crm_result(bottoms: list[str], asof: pd.Timestamp, horizon: int, n_samples: int) -> tuple[dict, CommercialModel, UpliftResult]:
+    """Datasets without CRM data: zero uplift, beta = 0 - the forecast is the calibrated statistical baseline."""
+    months = pd.date_range(asof + pd.offsets.MonthBegin(1), periods=horizon, freq="MS")
+    net = {"beta": {1: 0.0, 2: 0.0, 3: 0.0}, "n": 0, "improvement": None, "note": "no CRM data in this workspace - commercial uplift disabled"}
+    model = CommercialModel(None, None, {}, {}, np.ones(len(DELAY_SUPPORT)) / len(DELAY_SUPPORT), {}, {"note": "no CRM data"})
+    up = UpliftResult(pd.DataFrame(columns=["opportunity_id", "bottom_id", "month", "stage", "win_prob", "rep_probability", "expected_units", "unweighted_units"]),
+                      pd.DataFrame(0.0, index=months, columns=bottoms), np.zeros((len(bottoms), horizon, max(n_samples, 1))),
+                      {"open_opps": 0, "mean_win_prob": None, "mean_rep_probability": None, "gross_expected_units": 0.0, "note": "no CRM data"})
+    return net, model, up

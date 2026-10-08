@@ -6,7 +6,7 @@ import pandas as pd
 from sqlalchemy import delete, insert, select
 from sqlalchemy.orm import Session
 
-from app.core.db import Base
+from app.core.db import workspace_tables
 from app.core.settings_store import seed_defaults
 from app.data.synthetic import REGIONS, SyntheticBundle
 from app.mapping import fuzzy, service
@@ -16,8 +16,6 @@ from app.models.facts import (BacklogSnapshot, CapacityAllocation, Contract, Opp
 from app.models.ops import User
 from app.models.reference import Account, FxRate, Oem, OemAlias, OemIdentifier, ProductLine, Region, SystemSetting
 
-KEEP_TABLES = {"users", "jobs"}  # jobs must survive: the seed job itself is tracked there
-
 
 def _records(df: pd.DataFrame, cols: list[str]) -> list[dict]:
     d = df[cols].astype(object).where(df[cols].notna(), None)
@@ -25,9 +23,9 @@ def _records(df: pd.DataFrame, cols: list[str]) -> list[dict]:
 
 
 def wipe_domain_data(session: Session) -> None:
-    for t in reversed(Base.metadata.sorted_tables):
-        if t.name not in KEEP_TABLES:
-            session.execute(delete(t))
+    """Empty every table of the active workspace (users / jobs / workspaces are shared and untouched)."""
+    for t in reversed(workspace_tables()):
+        session.execute(delete(t))
     session.flush()
 
 

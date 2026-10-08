@@ -27,6 +27,7 @@
 22. [Cookbook: how do I…?](#22-cookbook-how-do-i)
 23. [File map](#23-file-map)
 24. [Glossary & FAQ](#24-glossary--faq)
+25. [Workspaces and bring-your-own-data](#25-workspaces-and-bring-your-own-data)
 
 ---
 
@@ -309,7 +310,7 @@ Severity by dollar impact: **HIGH ≥ $1M**, **MEDIUM ≥ $250k**. Alerts have s
 
 **Rule:** *async edge, sync core.*
 
-- Every FastAPI route is `async def`. DB access uses SQLAlchemy **`AsyncSession`** (`postgresql+psycopg` async / `sqlite+aiosqlite`).
+- Every FastAPI route is `async def`. DB access uses SQLAlchemy **`AsyncSession`** (`postgresql+psycopg` async).
 - `api/aio.py` gives two bridges:
   - `in_session(db, fn, …)` — runs a **sync service function** inside the async session via `run_sync` (I/O-bound CRUD).
   - `in_thread(fn, …)` — runs CPU-heavy pandas/numpy work (and mutations) in a **worker thread with its own sync Session** so the event loop never blocks.
@@ -474,3 +475,24 @@ MASTER.md          working log & verification status
 **What's frozen at lock?** AI units, consensus units, naive units, ASP, who/why — per series × month × horizon — so FVA can be computed later fairly.
 
 **Where is the single source of truth for project status?** `MASTER.md` (checklist + verification log).
+
+---
+
+## 25. Workspaces and bring-your-own-data
+
+**Why.** The platform started as one synthetic demo in one database. Real use needs several datasets side by side (your company data, a public benchmark, experiments) without mixing forecasts, overrides or audit trails. A **workspace** is that boundary.
+
+**How isolation works (concept).** One PostgreSQL *schema* per workspace (`ws_<slug>`). Every domain table — accounts, sales, mappings, forecast runs, overrides, audit log, settings — exists once per schema. Only three tables are shared in `public`: `users` (people), `workspaces` (the registry) and `jobs` (background work, tagged with a workspace id).
+*Why schemas and not a `workspace_id` column:* a column would need a filter in ~25 tables and every query; one forgotten filter leaks data between research projects. With schemas the database connection itself is pinned: `search_path = ws_x, public`, so unqualified table names resolve inside the workspace and the same code runs unchanged. Dropping a workspace is `DROP SCHEMA … CASCADE`.
+
+**Per request (code).** `get_adb` reads `X-Workspace` (slug) → looks it up (cached ~5 s) → opens an `AsyncSession` on that workspace's engine and stores the schema in a `ContextVar` (`current_schema`). Worker threads started with `anyio` inherit it; background jobs set it from the job row (`use_workspace`). `SessionLocal()` / `AsyncSessionLocal()` read the contextvar, so no service function ever receives a "workspace" argument. Engines are cached per schema (small pools). Schema names are validated against `^ws_[a-z0-9_]{1,48}$` before they reach SQL.
+
+**Provisioning.** `create_workspace` creates the schema, all workspace tables (`Base.metadata.create_all` limited to non-shared tables), HNSW indexes for pgvector, and the default settings, mapping rules and risk thresholds; the registry row is written last, so a workspace is never visible half-built. Alembic migrates only the shared tables; each workspace row carries `schema_version` for future per-schema upgrades.
+
+**Capabilities.** `compute_capabilities` counts rows per source table (sales, CRM snapshots, backlog, capacity, contracts, accounts vs OEMs). The API returns it in `/meta`; the UI shows what is present/missing and explains the disabled features. The engines honour the same facts: no CRM → `no_crm_result` (zero uplift, β = 0); no backlog → no revenue-gap alerts and a `n/a` coverage KPI; no capacity → no supply alerts; the DQ gate downgrades these checks to INFO.
+
+**Import (`app/data/importer.py`).** Required: month, customer, product, units, and revenue-or-price. Optional: region, OEM, family, a customer→OEM mapping file, backlog, capacity. Steps: read → canonicalise (dates to month starts; sub-monthly data aggregated, a partial last month dropped) → validate (≥18 months, series ≤ 600, numeric checks) → wipe the workspace → write reference data, accounts and 100 % mappings (or the supplied allocations) → `materialize_mapped_series` → DQ → optional first forecast. USD only for now (a `USD` FX row per month is created).
+**M5 preset (`app/data/m5.py`).** Store → OEM, state → region, department → product; revenue = units × weekly price; processed store by store to keep memory flat.
+
+**Limits worth knowing.** Importing replaces a workspace's data (no merge/append yet). CRM opportunity files cannot be imported (their point-in-time snapshots need a richer wizard); CRM stays a synthetic-workspace feature for now. Mixed currencies need conversion before upload. A customer split across OEMs is only supported through the mapping file.
+

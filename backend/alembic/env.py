@@ -10,7 +10,9 @@ from app.core.db import Base
 config = context.config
 if config.config_file_name:
     fileConfig(config.config_file_name)
-target_metadata = Base.metadata
+from app.core.db import shared_tables
+
+target_metadata = Base.metadata  # autogenerate sees every table; only the shared ones are migrated by Alembic (workspace schemas are provisioned in code)
 URL = get_settings().database_url
 
 

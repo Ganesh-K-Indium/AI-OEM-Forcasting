@@ -9,6 +9,20 @@ export interface User { email: string; full_name: string; role: Role; scope_oems
 export interface Meta {
   synthetic_mode: boolean; label: string; current_run_id: string | null; cycle_month: string | null; cycle_status: string | null;
   horizon: number; fx_policy: string; currency: string; units_label: string; version: string;
+  workspace: { id: string; slug: string; name: string; kind: WorkspaceKind; status: WorkspaceStatus } | null; capabilities: Capabilities | null;
+}
+export type WorkspaceKind = "synthetic" | "m5" | "custom";
+export type WorkspaceStatus = "EMPTY" | "IMPORTING" | "READY" | "FAILED" | "ARCHIVED";
+export interface Capabilities {
+  sales: number; mapped_rows: number; backlog: number; capacity: number; opportunities: number; opportunity_snapshots: number; contracts: number;
+  accounts: number; oems: number; regions: number; products: number; forecast_runs: number; first_month: string | null; last_month: string | null;
+  has_sales: boolean; has_backlog: boolean; has_capacity: boolean; has_crm: boolean; has_contracts: boolean; has_forecast: boolean; has_mapped: boolean;
+  features: Record<string, boolean>;
+}
+export interface Workspace {
+  id: string; slug: string; name: string; description: string | null; kind: WorkspaceKind; status: WorkspaceStatus; schema_name: string; source: Record<string, any> | null;
+  capabilities: Partial<Capabilities>; created_by: string | null; created_at: string;
+  active_job: { id: string; type: string; state: string; progress: number; message: string | null } | null;
 }
 export interface Run { id: string; cycle_month: string; kind: string; status: string; horizon: number; is_synthetic: boolean; created_at: string; locked_at: string | null; summary: Record<string, any> | null; error: string | null }
 export interface Filters { oems: string[]; regions: string[]; products: { code: string; name?: string }[]; horizons: number[] }

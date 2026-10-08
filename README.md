@@ -69,31 +69,45 @@ Wait until `docker compose ps` shows every service `healthy`/`Up` (API takes ~30
 
 > The browser talks to the API at `PUBLIC_API_URL` (default `http://localhost:8000`), which is **baked into the frontend at build time** — change it in `.env` and rebuild if you deploy on another host.
 
-### Option B — local dev (SQLite, no Docker)
+### Option B — local dev (Postgres in Docker, app on your machine)
+
+PostgreSQL + pgvector is the only supported database. Run just the database in Docker and the app natively:
 
 ```bash
-make setup           # python venv + deps (incl. torch/Chronos), npm install
-make api             # terminal 1 → http://localhost:8000/docs   (SQLite file at backend/data/oem.db)
-make web             # terminal 2 → http://localhost:3000
+docker compose up -d postgres redis      # DB on :5432 (stop any local Postgres that owns that port first)
+make setup                               # python venv + deps (incl. torch/Chronos), npm install
+export DATABASE_URL=postgresql+psycopg://oem:oem@localhost:5432/oem
+make api                                 # terminal 1 → http://localhost:8000/docs
+make web                                 # terminal 2 → http://localhost:3000
 ```
-Jobs run in a background thread when Celery is off, so no Redis is needed locally.
+Jobs run in a background thread when Celery is off, so Redis is optional locally.
 
-### 🌱 Seed the synthetic demo data (required on first run)
+### 🌱 Load data (required on first run)
 
-A fresh install is **empty** — the dashboard says "No forecast run yet" until you seed. Seeding generates a deterministic synthetic company, maps it to OEMs, replays past planning cycles (so FVA has history), forecasts the current cycle and computes risk.
+Everything lives in a **workspace** — an isolated research context with its own data, mappings, forecasts, overrides and audit log (one PostgreSQL schema each). A fresh install creates one empty workspace, **Synthetic demo**. Pick a data source per workspace:
+
+| Workspace type | What goes in | How |
+|---|---|---|
+| **Synthetic demo** | Generated ERP + CRM + backlog + capacity estate with known ground truth | *Data → Generate* (below) |
+| **Your own data** | Your sales-history file (+ optional customer→OEM mapping, backlog, capacity) | *Data → Import wizard* — [details](#-bring-your-own-data) |
+| **M5 benchmark** | Walmart retail data (store → OEM, state → region, department → product) | *Data → Load M5* — [details](#-m5-benchmark) |
+
+Seeding generates a deterministic synthetic company, maps it to OEMs, replays past planning cycles (so FVA has history), forecasts the current cycle and computes risk.
 
 **What it creates** (same every time, `seed=42`): ~87 ERP accounts (direct, distributors, look-alike decoys) · 36 months of history for ~120 OEM×Region×Product series · ~2,400 CRM opportunities with monthly snapshots · backlog, capacity, contracts, FX · simulated rep overrides in the past cycles · a current-cycle forecast with risk alerts. Currency USD, units in kunits.
 
 **Way 1 — in the UI** (works for Docker and local):
 1. Open http://localhost:3000 → click the **Admin** role card (`admin@demo.local` / `demo1234`) → **Sign in**
-2. **Admin → Jobs** → job type **`seed_demo`**, leave **fast** ticked → **Run**
-3. Watch the progress bar and message (*Generating… → Mapping… → Forecast cycles… → Risk…*). **Fast mode takes ≈ 2–3 minutes** (full mode ≈ 10+ min). When the state reads **SUCCESS**, open **Executive Dashboard**.
+2. The app opens on the empty **Synthetic demo** workspace → **Generate synthetic data** → choose *Quick* → **Generate data**
+3. Watch the progress bar and message (*Generating… → Mapping… → Forecast cycles… → Risk…*). **Quick takes ≈ 2–3 minutes** (full ≈ 10+ min). When it reads **Done**, open **Executive Dashboard**.
 
-**Way 2 — command line, no server** (local path; writes to the same SQLite DB):
+**Way 2 — command line, no server** (local path; writes to the same Postgres):
 ```bash
 cd backend && . .venv/bin/activate
 PYTHONPATH=. python -m app.cli seed                 # fast (≈2–3 min)
 PYTHONPATH=. python -m app.cli seed --full          # full model zoo, 6 replay cycles (slow)
+PYTHONPATH=. python -m app.cli seed --workspace my-second-demo   # seed into another (auto-created) workspace
+PYTHONPATH=. python -m app.cli workspaces           # list workspaces
 ```
 Inside Docker: `docker compose exec api python -m app.cli seed`
 
@@ -101,23 +115,24 @@ Inside Docker: `docker compose exec api python -m app.cli seed`
 ```bash
 TOKEN=$(curl -s localhost:8000/api/v1/auth/login -H 'content-type: application/json' \
         -d '{"email":"admin@demo.local","password":"demo1234"}' | python3 -c 'import sys,json;print(json.load(sys.stdin)["access_token"])')
-curl -s -X POST localhost:8000/api/v1/admin/jobs -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+# every data call is scoped to a workspace by the X-Workspace header (omitted = oldest workspace)
+curl -s -X POST localhost:8000/api/v1/admin/jobs -H "Authorization: Bearer $TOKEN" -H 'X-Workspace: synthetic-demo' -H 'content-type: application/json' \
      -d '{"job_type":"seed_demo","params":{"fast":true,"replay_cycles":2}}'
-curl -s localhost:8000/api/v1/admin/jobs -H "Authorization: Bearer $TOKEN"     # poll: state PENDING → RUNNING → SUCCESS
+curl -s localhost:8000/api/v1/admin/jobs -H "Authorization: Bearer $TOKEN" -H 'X-Workspace: synthetic-demo'   # poll: PENDING → RUNNING → SUCCESS
 ```
 
 **Check it worked**
-- Admin → Jobs shows `seed_demo` = **SUCCESS**; the top bar run selector shows a `CURRENT` run for *Sep 26*.
+- Data shows **Done** (Admin → Jobs: `seed_demo` = **SUCCESS**); the top bar run selector shows a `CURRENT` run for *Sep 26*.
 - Dashboard shows roughly **$490 M** consensus revenue over 12 months, a few dozen risk alerts, and 5 OEMs (APPLE, BOSCH, DELL, SIEMENS, TOYOTA) in the Explorer filters.
 - Mapping → Review queue holds a few fuzzy matches for you to approve (the look-alike decoys are deliberately *not* auto-merged).
 - `curl localhost:8000/api/v1/meta` returns a non-null `current_run_id`.
 
 **Notes**
-- **Re-seeding** wipes and regenerates all domain data (but keeps users and job history) — run it again any time to reset the demo.
+- **Re-seeding** wipes and regenerates all data **of that workspace only** (users, job history and other workspaces are untouched).
 - **Fast vs full:** fast uses Naive, SeasonalNaive, AutoETS, Croston-SBA, TSB and LightGBM. For the whole zoo (adds AutoARIMA, **Chronos-2**, Ensemble) run **`run_forecast`** with *fast* unticked after seeding, or `seed --full`. Chronos-2 needs the full Docker image (or `make setup`, which installs torch) and downloads weights on first use.
-- Only **admin** can run `seed_demo`; planners can run `run_forecast`.
+- Only **admin** can seed or import data; planners can run `run_forecast`.
 - Seeding is CPU-bound; on a laptop the progress bar can sit on "Backtesting" for a minute — that is normal.
-- If the job **FAILS**, expand the error in Admin → Jobs; common causes are listed under [Troubleshooting](#-troubleshooting).
+- If the job **FAILS**, expand the error in Data → progress panel or Admin → Jobs; common causes are listed under [Troubleshooting](#-troubleshooting).
 
 <p align="center"><img src="docs/screenshots/login.png" alt="Login landing page" width="860"/></p>
 
@@ -129,8 +144,36 @@ curl -s localhost:8000/api/v1/admin/jobs -H "Authorization: Bearer $TOKEN"     #
 
 ```bash
 docker compose down        # stop, keep data (Postgres volume survives)
-docker compose down -v     # stop AND delete all data (fresh install; re-seed afterwards)
+docker compose down -v     # stop AND delete all data (fresh install; re-create/seed workspaces afterwards)
 ```
+
+## 🗂 Workspaces
+
+A **workspace** = one dataset + everything derived from it (mappings, forecast runs, planning cycles, overrides, FVA, risk alerts, settings, audit chain). Use one per research question, client or experiment — nothing leaks between them.
+
+- **Switch** from the top bar; **create / archive / delete** on the *Workspaces* page (planners create, admins delete).
+- Technically each workspace is its own **PostgreSQL schema** (`ws_<slug>`); users and the workspace registry are shared. The API selects the schema per request from the `X-Workspace` header. Deleting a workspace is a `DROP SCHEMA`.
+- **Pages adapt to the data.** The workspace reports its *capabilities* (sales, CRM, backlog, capacity, contracts). Missing data switches the dependent feature off with an explanation instead of failing: no CRM → no commercial uplift or pipeline-vulnerability alerts; no backlog → no coverage/revenue-gap alerts; no capacity → no supply-bottleneck alerts; every customer is its own OEM → mapping review stays empty.
+- Workspace types: **Synthetic**, **Custom data**, **M5** (label in the top bar says which).
+
+## 📥 Bring your own data
+
+*Workspaces → New workspace → "Your own data"* → **Data → Import**:
+
+1. **Upload** your sales-history file (CSV or Parquet, ≤ 800 MB; bigger files can sit in `backend/data/import/`). Optionally add: customer→OEM **mapping**, **backlog** snapshots, **capacity** allocation. Template downloads are on the page.
+2. **Map columns** — headers are matched automatically (`date`/`period` → month, `client` → customer, `sku` → product, `qty` → units, `amount` → revenue, `territory` → region …); fix anything off. Only four fields are mandatory: **month, customer, product, units** plus revenue *or* price (or a constant price).
+3. **Check** — shows rows, months, customers, OEMs, regions, products, series and flags problems: unreadable dates, < 18 months of history (error), < 30 (warning), negative units, too many series (limit 600 OEM×region×product), daily/weekly data (summed to months; an incomplete last month is dropped).
+4. **Import** — a background job loads the data, builds the OEM hierarchy, materialises the history, runs the data-quality gate and (optionally) a first forecast. Importing **replaces** that workspace's data.
+
+How your columns become the OEM hierarchy: no OEM column → each customer *is* an OEM · OEM/region columns → exact (one account per customer/OEM/region combination) · mapping file → distributor-style allocation (a customer can split across OEMs). Currency is USD only for now; convert upstream.
+
+## 🧪 M5 benchmark
+
+M5 is the public Walmart retail benchmark (daily unit sales of 3,049 items in 10 stores, 2011–2016). Good for checking forecast accuracy, MinT reconciliation and revenue conversion on data nobody generated. It has **no** distributors, pipeline, backlog or capacity, so only the forecasting, reconciliation, revenue and governance features apply.
+
+1. Create a workspace of type **M5 benchmark**.
+2. Download *M5 Forecasting – Accuracy* from Kaggle (accept the competition rules) and copy `sales_train_evaluation.csv`, `calendar.csv`, `sell_prices.csv` into **`backend/data/import/m5/`** (Docker mounts this folder into the API and worker).
+3. **Data → Load M5 and forecast** (or `python -m app.cli import-m5`). Mapping: store → OEM (10), state → region (3), department → product (7) = 70 series; revenue = units × weekly sell price; the incomplete last month is dropped. Tip: *first N items* gives a quick trial.
 
 ## 🧭 Product tour
 
@@ -216,6 +259,8 @@ Base `/api/v1` · Bearer JWT · interactive docs at **/docs**. Every endpoint is
 | Risk | `/risk/alerts` · `/risk/summary` · `/risk/coverage` · `/risk/thresholds` · `POST /risk/refresh` |
 | Mapping | `/mapping/accounts` · `/queue` · `/{id}/review` · `/rules` · `/oems` · `POST /run` · `/restate` |
 | Admin | `/admin/jobs` · `/dq` · `/drift` · `/settings` · `/users` |
+| Workspaces | `GET/POST /workspaces` · `PATCH/DELETE /workspaces/{id}` (scope any other call with header `X-Workspace: <slug>`) |
+| Data | `/data/status` · `/data/upload` · `/data/validate` · `POST /data/import` · `/data/clear` · `/data/templates/{role}` |
 
 Typed frontend client: `npm run gen:types` (openapi-typescript) → `frontend/src/lib/api-schema.d.ts`; a hand-maintained mirror lives in `src/lib/types.ts`.
 
@@ -225,13 +270,14 @@ Typed frontend client: `npm run gen:types` (openapi-typescript) → `frontend/sr
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `DATABASE_URL` | SQLite file | `postgresql+psycopg://user:pass@host/db` in production |
+| `DATABASE_URL` | `postgresql+psycopg://oem:oem@localhost:5432/oem` | PostgreSQL + pgvector (the only supported DB) |
+| `IMPORT_DIR` | `backend/data/import` | Uploads and M5 files |
+| `BOOTSTRAP_DEMO_WORKSPACE` | true | Create the empty “Synthetic demo” workspace on first start |
 | `USE_CELERY` / `REDIS_URL` | false / localhost | Celery workers vs in-process job thread |
 | `JWT_SECRET` | dev value | **Change in production** |
 | `AUTH_MODE` | `local` | `oidc` + `OIDC_JWKS_URL`, `OIDC_ISSUER`, `OIDC_AUDIENCE`, `OIDC_ROLE_CLAIM` |
 | `ENABLE_CHRONOS` | true | Foundation model (needs the torch image) |
 | `ENABLE_TIREX` | **false** | NXAI Community License — legal review first |
-| `SYNTHETIC_MODE` | true | Shows the banner; labels every run |
 | `CORS_ORIGINS` | localhost:3000 | Comma-separated |
 
 **Business settings live in the database** (Admin → Settings, audit-logged): FX policy, fuzzy thresholds (auto ≥ 0.93, review ≥ 0.62), segmentation cut-offs, override deviation limit (60 %), approval requirement, champion tie tolerance, FVA significance, DQ blocking. Rules, OEM identifiers/aliases and risk thresholds are tables, not code.
@@ -241,11 +287,9 @@ Typed frontend client: `npm run gen:types` (openapi-typescript) → `frontend/sr
 ## 🛠 Development
 
 ```bash
-make test-fast       # unit tests (SQLite) ~15 s
-make test-e2e        # seeds demo (fast) + full API/RBAC/async tests ~2.5 min
-# Postgres/pgvector tests (use a free port; a local Postgres may already own 5432):
-docker run -d --name pgtest -e POSTGRES_USER=oem -e POSTGRES_PASSWORD=oem -e POSTGRES_DB=oem_test -p 5544:5432 pgvector/pgvector:pg16
-TEST_POSTGRES_URL=postgresql+psycopg://oem:oem@localhost:5544/oem_test pytest -m postgres
+make test-db         # once: throw-away Postgres+pgvector for tests on :5544
+make test-fast       # unit + workspace/import tests ~50 s
+make test-e2e        # seeds a workspace through the API + RBAC/async/import tests ~3 min
 cd frontend && npm run typecheck && npm run build
 ```
 
@@ -253,7 +297,7 @@ cd frontend && npm run typecheck && npm run build
 
 ```
 backend/app/   core · models · data · mapping · ml · forecasting · governance · risk · quality · tasks · schemas · api
-backend/tests/ synthetic · mapping · segmentation/metrics · reconcile · governance · commercial/risk · oidc · e2e · postgres
+backend/tests/ synthetic · mapping · segmentation/metrics · reconcile · governance · commercial/risk · oidc · workspaces/import/M5 · e2e
 frontend/src/  app (pages) · components (ui, charts) · lib (api, auth, types)
 docs/          GUIDE.md (full reference) · ARCHITECTURE.md · screenshots/
 ```

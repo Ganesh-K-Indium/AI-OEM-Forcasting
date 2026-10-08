@@ -4,10 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import require_workspace
 from app.api.aio import in_session, in_thread
 from app.api.deps import run_or_404
 from app.core.config import get_settings
-from app.core.db import get_adb
+from app.core.db import current_schema, get_adb
+from app.core.workspace import compute_capabilities
+from app.models.ops import Workspace
 from app.core.security import current_user
 from app.core.settings_store import get_setting
 from app.forecasting import service
@@ -17,7 +20,7 @@ from app.models.reference import Oem, ProductLine, Region
 from app.schemas.common import FilterOptions, Meta, RunOut
 from app.schemas.forecast import BenchmarkOut, BenchmarkRow, DetailOut, ExplorerOut
 
-router = APIRouter(tags=["forecast"], dependencies=[Depends(current_user)])
+router = APIRouter(tags=["forecast"], dependencies=[Depends(current_user), Depends(require_workspace)])
 public = APIRouter(tags=["meta"])
 
 
@@ -31,13 +34,19 @@ def _meta(s):
     cfg = get_settings()
     run = service.latest_run(s)
     cyc = s.execute(select(PlanningCycle).where(PlanningCycle.cycle_month == run.cycle_month)).scalar_one_or_none() if run else None
-    syn = bool(run.is_synthetic) if run else cfg.synthetic_mode
-    return Meta(synthetic_mode=syn, label="[SYNTHETIC DEMO MODE]" if syn else "PRODUCTION DATA", current_run_id=run.id if run else None,
-                cycle_month=run.cycle_month if run else None, cycle_status=cyc.status if cyc else None, horizon=cfg.horizon, fx_policy=get_setting(s, "fx_policy"), version="1.0.0")
+    w = s.execute(select(Workspace).where(Workspace.schema_name == current_schema.get())).scalar_one_or_none()
+    kind = w.kind if w else "custom"
+    label = {"synthetic": "[SYNTHETIC DEMO MODE]", "m5": "M5 BENCHMARK DATA"}.get(kind, "CUSTOM DATA")
+    return Meta(synthetic_mode=kind == "synthetic", label=label, current_run_id=run.id if run else None, units_label="kunits" if kind == "synthetic" else "units",
+                cycle_month=run.cycle_month if run else None, cycle_status=cyc.status if cyc else None, horizon=cfg.horizon, fx_policy=get_setting(s, "fx_policy"), version="1.0.0",
+                workspace=dict(id=w.id, slug=w.slug, name=w.name, kind=w.kind, status=w.status) if w else None, capabilities=compute_capabilities(s))
 
 
 @public.get("/meta", response_model=Meta)
 async def meta(db: AsyncSession = Depends(get_adb)):
+    if current_schema.get() is None:
+        return Meta(synthetic_mode=False, label="NO WORKSPACE", current_run_id=None, cycle_month=None, cycle_status=None, horizon=get_settings().horizon,
+                    fx_policy="constant", version="1.0.0")
     return await in_session(db, _meta)
 
 

@@ -54,6 +54,10 @@ def threshold_for(rows: list[RiskThreshold], product: str, region: str) -> Thr:
     return Thr()
 
 
+def has_rows(session: Session, model) -> bool:
+    return session.execute(select(model.id).limit(1)).first() is not None
+
+
 def _sev(impact: float) -> str:
     return "HIGH" if impact >= HIGH_USD else "MEDIUM" if impact >= MED_USD else "LOW"
 
@@ -130,7 +134,7 @@ def refresh_alerts(session: Session, run_id: str) -> int:
     cons = build_consensus(session, run_id).bottom
     alerts: list[dict] = []
     # ---------------------------------------------------------------- 1. revenue gap
-    ct = coverage_table(session, run, cons)
+    ct = coverage_table(session, run, cons) if has_rows(session, BacklogSnapshot) else cons.iloc[0:0].assign(coverage=0.0, threshold=0.0)
     for (o, r, p), g in ct.groupby(["oem", "region", "product"]):
         bad = g[(g.coverage < g.threshold) & (g.consensus_revenue > 0)].sort_values("month")
         if bad.empty:
@@ -140,7 +144,7 @@ def refresh_alerts(session: Session, run_id: str) -> int:
             continue
         alerts.append(dict(run_id=run_id, alert_type="REVENUE_GAP", severity=_sev(gap), oem_code=o, region_code=r, product_code=p, first_month=bad.month.min(),
                            last_month=bad.month.max(), financial_impact_usd=gap,
-                           title=f"Revenue gap risk: {o} {r} {p} - coverage {bad.coverage.min():.0%} < {bad.threshold.iloc[0]:.0%} in T+{int(bad.horizon.min())}..T+{int(bad.horizon.max())}",
+                           title=f"Revenue gap risk: {o} {r} {p} - coverage {bad.coverage.min():.1%} < {bad.threshold.iloc[0]:.1%} in T+{int(bad.horizon.min())}..T+{int(bad.horizon.max())}",
                            detail=dict(months=[dict(month=str(x.month), horizon=int(x.horizon), coverage=float(x.coverage), threshold=float(x.threshold),
                                                     configured_floor=float(x.configured_floor), forecast_usd=float(x.consensus_revenue), backlog_usd=float(x.bl_value),
                                                     uncovered_usd=float(max(x.consensus_revenue - x.bl_value, 0))) for x in bad.itertuples()])))

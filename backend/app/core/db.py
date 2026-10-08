@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-import json
+import re
 from collections.abc import Iterator
+from contextvars import ContextVar
 from contextlib import contextmanager
 
 import numpy as np
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import JSON, Text, TypeDecorator, create_engine, event
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from fastapi import Request
+from sqlalchemy import JSON, Engine, TypeDecorator, create_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
+from sqlalchemy.orm import DeclarativeBase, Session
 
 from app.core.config import get_settings
 
@@ -20,88 +22,126 @@ class Base(DeclarativeBase):
 
 
 class EmbeddingType(TypeDecorator):
-    """pgvector `vector(N)` on PostgreSQL, JSON text elsewhere (tests / SQLite dev)."""
+    """pgvector `vector(N)`; values are numpy arrays in Python."""
 
-    impl = Text
+    impl = Vector
     cache_ok = True
 
     def __init__(self, dim: int = EMBED_DIM):
-        super().__init__()
+        super().__init__(dim)
         self.dim = dim
 
-    def load_dialect_impl(self, dialect):
-        if dialect.name == "postgresql":
-            return dialect.type_descriptor(Vector(self.dim))
-        return dialect.type_descriptor(Text())
-
     def process_bind_param(self, value, dialect):
-        if value is None:
-            return None
-        arr = np.asarray(value, dtype=float).tolist()
-        return arr if dialect.name == "postgresql" else json.dumps(arr)
+        return None if value is None else np.asarray(value, dtype=float).tolist()
 
     def process_result_value(self, value, dialect):
-        if value is None:
-            return None
-        if isinstance(value, str):
-            return np.asarray(json.loads(value), dtype=float)
-        return np.asarray(value, dtype=float)
+        return None if value is None else np.asarray(value, dtype=float)
 
 
 JsonType = JSON
 
 
-def _make_engine(url: str):
-    kwargs: dict = {"future": True, "pool_pre_ping": True}
-    if url.startswith("sqlite"):
-        kwargs["connect_args"] = {"check_same_thread": False, "timeout": 60}
-    eng = create_engine(url, **kwargs)
-    if url.startswith("sqlite"):
+SHARED_TABLES = frozenset({"users", "workspaces", "jobs"})  # live in `public`; everything else lives in one schema per workspace
+_SCHEMA_RE = re.compile(r"^ws_[a-z0-9_]{1,48}$")
 
-        @event.listens_for(eng, "connect")
-        def _pragmas(dbapi_conn, _):  # pragma: no cover - trivial
-            cur = dbapi_conn.cursor()
-            cur.execute("PRAGMA journal_mode=WAL")
-            cur.execute("PRAGMA foreign_keys=ON")
-            cur.close()
-
-    return eng
+# schema of the workspace the current request / job operates on (None -> shared tables only)
+current_schema: ContextVar[str | None] = ContextVar("current_schema", default=None)
+_URL = get_settings().database_url
+_sync: dict[str | None, Engine] = {}
+_async: dict[str | None, AsyncEngine] = {}
 
 
-def async_url(url: str) -> str:
-    """Driver URL for the async engine: psycopg3 serves both sync and async; SQLite needs aiosqlite."""
-    return url.replace("sqlite:///", "sqlite+aiosqlite:///", 1) if url.startswith("sqlite:") else url
+def check_schema(schema: str) -> str:
+    if not _SCHEMA_RE.match(schema):
+        raise ValueError(f"invalid workspace schema name: {schema!r}")
+    return schema
 
 
-def _make_async_engine(url: str):
-    kw: dict = {"pool_pre_ping": True}
-    if url.startswith("sqlite"):
-        kw["connect_args"] = {"timeout": 60}
+def _opts(schema: str | None) -> dict:
+    kw: dict = {"pool_pre_ping": True, "pool_recycle": 1800}
+    if schema:
+        kw["connect_args"] = {"options": f"-c search_path={check_schema(schema)},public"}
+        kw.update(pool_size=4, max_overflow=8)
     else:
-        kw.update(pool_size=10, max_overflow=20, pool_recycle=1800)
-    return create_async_engine(async_url(url), **kw)
+        kw.update(pool_size=6, max_overflow=14)
+    return kw
 
 
-engine = _make_engine(get_settings().database_url)  # sync: Celery workers, jobs, migrations, analytics threads
-SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)
-async_engine = _make_async_engine(get_settings().database_url)  # async: FastAPI request path
-AsyncSessionLocal = async_sessionmaker(bind=async_engine, expire_on_commit=False, autoflush=False, class_=AsyncSession)
+def engine_for(schema: str | None = None) -> Engine:
+    """Sync engine whose connections resolve unqualified tables in `schema` first, then `public`."""
+    if schema not in _sync:
+        _sync[schema] = create_engine(_URL, future=True, **_opts(schema))
+    return _sync[schema]
+
+
+def async_engine_for(schema: str | None = None) -> AsyncEngine:
+    if schema not in _async:
+        _async[schema] = create_async_engine(_URL, **_opts(schema))
+    return _async[schema]
+
+
+def forget_schema(schema: str) -> None:
+    """Dispose cached engines of a (dropped) workspace schema."""
+    e = _sync.pop(schema, None)
+    if e is not None:
+        e.dispose()
+    _async.pop(schema, None)
+
+
+class _Factory:
+    """`SessionLocal()` -> Session bound to the active workspace (contextvar) unless `schema=` is given."""
+
+    def __call__(self, schema: str | None | object = ...) -> Session:
+        sc = current_schema.get() if schema is ... else schema
+        return Session(bind=engine_for(sc), expire_on_commit=False, autoflush=False)
+
+
+class _AsyncFactory:
+    def __call__(self, schema: str | None | object = ...) -> AsyncSession:
+        sc = current_schema.get() if schema is ... else schema
+        return AsyncSession(bind=async_engine_for(sc), expire_on_commit=False, autoflush=False)
+
+
+SessionLocal = _Factory()
+AsyncSessionLocal = _AsyncFactory()
+engine = engine_for(None)  # shared (public) engine: users, workspaces, jobs, migrations, bootstrap
+async_engine = async_engine_for(None)
 
 
 def configure_engine(url: str):
-    """Re-point both engines (tests / CLI)."""
-    global engine, async_engine
-    engine.dispose()
-    engine = _make_engine(url)
-    SessionLocal.configure(bind=engine)
-    async_engine = _make_async_engine(url)
-    AsyncSessionLocal.configure(bind=async_engine)
+    """Re-point every engine at another database (tests / CLI)."""
+    global _URL, engine, async_engine
+    for e in list(_sync.values()):
+        e.dispose()
+    _sync.clear()
+    _async.clear()
+    _URL = url
+    engine, async_engine = engine_for(None), async_engine_for(None)
     return engine
 
 
+def dispose_all() -> None:
+    for e in list(_sync.values()):
+        e.dispose()
+
+
+async def dispose_all_async() -> None:
+    for e in list(_async.values()):
+        await e.dispose()
+
+
 @contextmanager
-def session_scope() -> Iterator[Session]:
-    s = SessionLocal()
+def use_workspace(schema: str | None):
+    tok = current_schema.set(schema)
+    try:
+        yield
+    finally:
+        current_schema.reset(tok)
+
+
+@contextmanager
+def session_scope(schema: str | None | object = ...) -> Iterator[Session]:
+    s = SessionLocal(schema)
     try:
         yield s
         s.commit()
@@ -112,6 +152,14 @@ def session_scope() -> Iterator[Session]:
         s.close()
 
 
+def workspace_tables():
+    return [t for t in Base.metadata.sorted_tables if t.name not in SHARED_TABLES]
+
+
+def shared_tables():
+    return [t for t in Base.metadata.sorted_tables if t.name in SHARED_TABLES]
+
+
 def get_db() -> Iterator[Session]:
     s = SessionLocal()
     try:
@@ -120,7 +168,13 @@ def get_db() -> Iterator[Session]:
         s.close()
 
 
-async def get_adb():
-    """Request-scoped AsyncSession (FastAPI dependency)."""
-    async with AsyncSessionLocal() as s:
+async def get_adb(request: Request):
+    """Request-scoped AsyncSession bound to the workspace named by the `X-Workspace` header (or `?workspace=`)."""
+    from app.core.workspace import resolve_workspace
+
+    ws = await resolve_workspace(request.headers.get("x-workspace") or request.query_params.get("workspace"))
+    schema = ws.schema_name if ws else None
+    current_schema.set(schema)  # per-request task context; worker threads started with anyio inherit it
+    async with AsyncSessionLocal(schema) as s:
+        s.info["workspace"] = ws
         yield s

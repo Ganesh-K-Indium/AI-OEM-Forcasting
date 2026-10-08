@@ -25,10 +25,11 @@ htmlcov/
 build/
 dist/
 
-# --- runtime data / artifacts (SQLite DB, model artifacts, HF cache) ---
-backend/data/
-*.db
-*.sqlite3
+# --- runtime data / artifacts (model artifacts, uploads, M5 files, HF cache) ---
+backend/data/*
+!backend/data/import/
+backend/data/import/*
+!backend/data/import/.gitkeep
 *.parquet
 *.duckdb
 *.ckpt

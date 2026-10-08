@@ -84,3 +84,8 @@ export function Kpi({ label, value, sub, tone }: { label: string; value: React.R
 export const PageHeader = ({ title, sub, right }: { title: string; sub?: React.ReactNode; right?: React.ReactNode }) => (
   <div className="mb-4 flex flex-wrap items-end justify-between gap-3"><div><h1 className="text-xl font-semibold">{title}</h1>{sub && <p className="text-sm text-ink2">{sub}</p>}</div><div className="flex items-center gap-2">{right}</div></div>
 );
+
+/** Explains why a feature is idle for this workspace and what data would switch it on. */
+export const CapabilityNote = ({ title, children }: { title: string; children: React.ReactNode }) => (
+  <div role="note" className="mb-4 flex items-start gap-2 rounded-md border border-brand/40 bg-brand/10 p-3 text-sm"><Info size={16} className="mt-0.5 shrink-0 text-brand" /><div><div className="font-medium">{title}</div><div className="text-xs text-ink2">{children}</div></div></div>
+);

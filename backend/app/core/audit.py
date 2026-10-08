@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
+from app.core.events import notify_data_changed
 from app.models.governance import AuditLog
 
 GENESIS = "0" * 64
@@ -22,8 +23,7 @@ def _hash(prev: str, user: str, action: str, etype: str, eid: str, before: Any, 
 
 
 def audit(session: Session, user: str, action: str, entity_type: str, entity_id: Any, before: Any = None, after: Any = None) -> AuditLog:
-    if session.get_bind().dialect.name == "postgresql":
-        session.execute(text("SELECT pg_advisory_xact_lock(727001)"))  # serialise chain appends across API/worker processes
+    session.execute(text("SELECT pg_advisory_xact_lock(727001)"))  # serialise chain appends across API/worker processes
     last = session.execute(select(AuditLog.hash).order_by(AuditLog.id.desc()).limit(1)).scalar()
     prev = last or GENESIS
     eid = str(entity_id)
@@ -31,6 +31,7 @@ def audit(session: Session, user: str, action: str, entity_type: str, entity_id:
                    prev_hash=prev, hash=_hash(prev, user, action, entity_type, eid, before, after))
     session.add(row)
     session.flush()
+    notify_data_changed(session)  # delivered on commit: other users' open pages refresh
     return row
 
 

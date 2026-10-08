@@ -85,6 +85,8 @@ def load_crm(session: Session, cycle_month: date) -> CrmData:
 
 def pipeline_drivers(crm: CrmData, months: pd.DatetimeIndex, hier: Hierarchy) -> dict[str, pd.DataFrame]:
     """Per node: monthly open-pipeline quantity and won quantity (point-in-time) used as exogenous-driver evidence."""
+    if crm.snaps.empty:
+        return {u: pd.DataFrame({"pipeline_open": 0.0, "won_qty": 0.0}, index=months) for u in hier.ids}
     sn = crm.snaps.merge(crm.node_map, on="opportunity_id")
     sn["bid"] = sn.oem_code + "|" + sn.region_code + "|" + sn.opportunity_id.map(crm.opps.set_index("id")["product_code"])
     sn["q"] = sn.quantity_units * sn.pct

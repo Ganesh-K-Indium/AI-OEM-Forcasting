@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import require_workspace
 from app.api.aio import in_session
 from app.core.audit import audit
 from app.core.db import get_adb
@@ -19,7 +20,7 @@ from app.schemas.admin import JobOut
 from app.schemas.mapping import AccountOut, AliasIn, IdentifierIn, MappingCandidate, OemOut, ReviewMappingIn, RuleIn, RuleOut, SetMappingIn
 from app.tasks.jobs import submit_job
 
-router = APIRouter(prefix="/mapping", tags=["mapping"], dependencies=[Depends(current_user)])
+router = APIRouter(prefix="/mapping", tags=["mapping"], dependencies=[Depends(current_user), Depends(require_workspace)])
 EDIT = ("steward",)
 
 
@@ -94,13 +95,13 @@ async def set_mapping(account_id: int, body: SetMappingIn, db: AsyncSession = De
 
 @router.post("/run", response_model=JobOut, status_code=202)
 async def run_pipeline(db: AsyncSession = Depends(get_adb), user: User = Depends(require_roles(*EDIT))):
-    return JobOut.model_validate(await in_session(db, submit_job, "mapping_pipeline", {}, user.email), from_attributes=True)
+    return JobOut.model_validate(await in_session(db, submit_job, "mapping_pipeline", {}, user.email, db.info["workspace"].id), from_attributes=True)
 
 
 @router.post("/restate", response_model=JobOut, status_code=202)
 async def restate(db: AsyncSession = Depends(get_adb), user: User = Depends(require_roles(*EDIT))):
     """Rebuild OEM x Region x Product history after mapping edits (effective-dated resolution is re-applied)."""
-    return JobOut.model_validate(await in_session(db, submit_job, "materialize", {}, user.email), from_attributes=True)
+    return JobOut.model_validate(await in_session(db, submit_job, "materialize", {}, user.email, db.info["workspace"].id), from_attributes=True)
 
 
 def _rule_out(r: MappingRule, oems: dict[int, str]) -> RuleOut:

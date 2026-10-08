@@ -11,7 +11,6 @@ from sqlalchemy.orm import Session
 
 from app.core.calendar import add_months
 from app.core.config import get_settings
-from app.core.db import Base, engine
 from app.data import loader
 from app.data.synthetic import generate
 from app.forecasting.pipeline import run_forecast
@@ -56,7 +55,6 @@ def simulate_overrides(session: Session, run_id: str, rng: np.random.Generator, 
 def seed_demo(session: Session, progress: Callable[[float, str], None] | None = None, replay_cycles: int = 6, fast: bool = False) -> dict:
     cfg = get_settings()
     pg = progress or (lambda f, m: None)
-    Base.metadata.create_all(engine)
     pg(0.02, "Generating synthetic enterprise data")
     loader.wipe_domain_data(session)
     b = generate(cfg.synth_seed, cfg.synth_end_month, cfg.synth_months, cfg.synth_opportunities)

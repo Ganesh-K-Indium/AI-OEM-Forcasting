@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.aio import anyio_hash, in_session
+from app.api.deps import require_workspace
 from app.core.audit import audit
 from app.core.db import get_adb
 from app.core.security import current_user, require_roles
@@ -15,32 +16,35 @@ from app.schemas.common import UserOut
 from app.tasks.jobs import JOB_TYPES, submit_job
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(current_user)])
+WS = [Depends(require_workspace)]
 
 
 def _job(j: Job) -> JobOut:
     return JobOut.model_validate(j, from_attributes=True)
 
 
-def _submit(s, job_type, params, email):
+def _submit(s, job_type, params, email, workspace_id):
     try:
-        return _job(submit_job(s, job_type, params, email))
+        return _job(submit_job(s, job_type, params, email, workspace_id))
     except ValueError as e:
         raise HTTPException(409, str(e)) from e
 
 
-@router.post("/jobs", response_model=JobOut, status_code=202)
+@router.post("/jobs", response_model=JobOut, status_code=202, dependencies=WS)
 async def create_job(body: JobIn, db: AsyncSession = Depends(get_adb), user: User = Depends(require_roles("planner"))):
-    if body.job_type == "seed_demo" and user.role != "admin":
-        raise HTTPException(403, "only admins can (re)seed demo data")
-    return await in_session(db, _submit, body.job_type, body.params, user.email)
+    if body.job_type in ("seed_demo", "import_dataset") and user.role != "admin":
+        raise HTTPException(403, "only admins can (re)seed or import data")
+    if body.job_type == "seed_demo" and db.info["workspace"].kind != "synthetic":
+        raise HTTPException(409, "seed_demo only applies to synthetic workspaces; use Data -> Import for this one")
+    return await in_session(db, _submit, body.job_type, body.params, user.email, db.info["workspace"].id)
 
 
-@router.get("/jobs", response_model=list[JobOut])
+@router.get("/jobs", response_model=list[JobOut], dependencies=WS)
 async def jobs(limit: int = 30, db: AsyncSession = Depends(get_adb)):
-    return [_job(j) for j in (await db.execute(select(Job).order_by(Job.created_at.desc()).limit(limit))).scalars()]
+    return [_job(j) for j in (await db.execute(select(Job).where(Job.workspace_id == db.info["workspace"].id).order_by(Job.created_at.desc()).limit(limit))).scalars()]
 
 
-@router.get("/jobs/{job_id}", response_model=JobOut)
+@router.get("/jobs/{job_id}", response_model=JobOut, dependencies=WS)
 async def job(job_id: str, db: AsyncSession = Depends(get_adb)):
     j = await db.get(Job, job_id)
     if j is None:
@@ -54,7 +58,7 @@ async def job_types():
     return list(JOB_TYPES)
 
 
-@router.get("/dq", response_model=list[DqOut])
+@router.get("/dq", response_model=list[DqOut], dependencies=WS)
 async def dq(db: AsyncSession = Depends(get_adb)):
     latest = (await db.execute(select(DqResult.batch_id).order_by(DqResult.id.desc()).limit(1))).scalar()
     if latest is None:
@@ -63,7 +67,7 @@ async def dq(db: AsyncSession = Depends(get_adb)):
     return [DqOut.model_validate(r, from_attributes=True) for r in rows]
 
 
-@router.get("/drift", response_model=list[DriftOut])
+@router.get("/drift", response_model=list[DriftOut], dependencies=WS)
 async def drift(run_id: str | None = None, db: AsyncSession = Depends(get_adb)):
     q = select(DriftReport).order_by(DriftReport.id.desc()).limit(60)
     if run_id:
@@ -75,7 +79,7 @@ def _settings(s):
     return [SettingOut(key=k, value=get_setting(s, k), description=d) for k, (_, d) in DEFAULTS.items()]
 
 
-@router.get("/settings", response_model=list[SettingOut])
+@router.get("/settings", response_model=list[SettingOut], dependencies=WS)
 async def settings(db: AsyncSession = Depends(get_adb)):
     return await in_session(db, _settings)
 
@@ -87,7 +91,7 @@ def _put(s, email, key, value):
     return SettingOut(key=key, value=value, description=DEFAULTS[key][1])
 
 
-@router.put("/settings/{key}", response_model=SettingOut)
+@router.put("/settings/{key}", response_model=SettingOut, dependencies=WS)
 async def put_setting(key: str, body: SettingIn, db: AsyncSession = Depends(get_adb), user: User = Depends(require_roles("admin"))):
     if key not in DEFAULTS:
         raise HTTPException(404, "unknown setting")
@@ -107,6 +111,7 @@ async def create_user(body: UserIn, db: AsyncSession = Depends(get_adb), user: U
     u = User(email=body.email.lower(), full_name=body.full_name, role=body.role, password_hash=pw, scope_oems=body.scope_oems, scope_regions=body.scope_regions)
     db.add(u)
     await db.flush()
-    await db.run_sync(lambda s: audit(s, user.email, "USER_CREATE", "user", u.email, None, dict(role=u.role)))
+    if db.info.get("workspace") is not None:
+        await db.run_sync(lambda s: audit(s, user.email, "USER_CREATE", "user", u.email, None, dict(role=u.role)))
     await db.commit()
     return u

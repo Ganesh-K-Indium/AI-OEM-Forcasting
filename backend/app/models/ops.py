@@ -19,6 +19,7 @@ class Job(Base):
     result: Mapped[dict | None] = mapped_column(JsonType, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    workspace_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -61,4 +62,22 @@ class User(Base):
     scope_oems: Mapped[list | None] = mapped_column(JsonType, nullable=True)  # row-level scope for sales_rep
     scope_regions: Mapped[list | None] = mapped_column(JsonType, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class Workspace(Base):
+    """One isolated research / dataset context. Its data lives in its own PostgreSQL schema (`schema_name`)."""
+
+    __tablename__ = "workspaces"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    slug: Mapped[str] = mapped_column(String(48), unique=True)
+    name: Mapped[str] = mapped_column(String(96))
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    kind: Mapped[str] = mapped_column(String(12))  # synthetic | m5 | custom
+    schema_name: Mapped[str] = mapped_column(String(52), unique=True)
+    status: Mapped[str] = mapped_column(String(12), default="EMPTY")  # EMPTY | IMPORTING | READY | FAILED | ARCHIVED
+    schema_version: Mapped[int] = mapped_column(Integer, default=1)
+    source: Mapped[dict | None] = mapped_column(JsonType, nullable=True)  # how the data got here (file names, column map, row counts)
+    capabilities: Mapped[dict | None] = mapped_column(JsonType, nullable=True)  # cached; recomputed after every load
+    created_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

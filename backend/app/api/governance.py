@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import require_workspace
 from app.api.aio import UserCtx, in_session, in_thread
 from app.api.deps import run_or_404
 from app.core.audit import verify_chain
@@ -19,7 +20,7 @@ from app.models.ops import User
 from app.risk.engine import refresh_alerts
 from app.schemas.forecast import AuditOut, FvaOut, OverrideIn, OverrideOut, ReviewIn
 
-router = APIRouter(tags=["governance"], dependencies=[Depends(current_user)])
+router = APIRouter(tags=["governance"], dependencies=[Depends(current_user), Depends(require_workspace)])
 
 
 def _guard(fn):

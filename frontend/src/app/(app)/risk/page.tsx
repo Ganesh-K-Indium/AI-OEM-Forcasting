@@ -1,11 +1,12 @@
 "use client";
+import Link from "next/link";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { get, patch, post, put } from "@/lib/api";
 import { useRun } from "@/lib/run-context";
 import { useAuth } from "@/lib/auth";
 import type { Alert, RiskSummary, Threshold } from "@/lib/types";
-import { Badge, Button, Card, CardHeader, Empty, ErrorBox, Input, Kpi, Label, PageHeader, Select, Sheet, Spinner, Table, Td, Textarea, Th, sevTone } from "@/components/ui";
+import { Badge, Button, CapabilityNote, Card, CardHeader, Empty, ErrorBox, Input, Kpi, Label, PageHeader, Select, Sheet, Spinner, Table, Td, Textarea, Th, sevTone } from "@/components/ui";
 import { fmtMonth, fmtPct, fmtUsd } from "@/lib/utils";
 
 const TYPES = ["REVENUE_GAP", "SUPPLY_BOTTLENECK", "PIPELINE_VULNERABILITY"];
@@ -66,7 +67,7 @@ function Thresholds() {
 }
 
 export default function RiskPage() {
-  const { runId } = useRun();
+  const { runId, meta } = useRun();
   const { can } = useAuth();
   const qc = useQueryClient();
   const [type, setType] = useState(""); const [status, setStatus] = useState("OPEN"); const [sel, setSel] = useState<Alert | null>(null);
@@ -76,6 +77,14 @@ export default function RiskPage() {
   if (!runId) return <Empty>No run selected.</Empty>;
   return (
     <div>
+      {meta?.capabilities && (!meta.capabilities.has_backlog || !meta.capabilities.has_capacity || !meta.capabilities.has_crm) && (
+        <CapabilityNote title="Some risk checks are off for this workspace">
+          {!meta.capabilities.has_backlog && <>No backlog data → coverage ratio and revenue-gap alerts are disabled. </>}
+          {!meta.capabilities.has_capacity && <>No capacity data → supply-bottleneck alerts are disabled. </>}
+          {!meta.capabilities.has_crm && <>No CRM data → pipeline-vulnerability alerts are disabled. </>}
+          Add the missing tables on the <Link href="/data" className="text-brand underline">Data</Link> page to switch them on.
+        </CapabilityNote>
+      )}
       <PageHeader title="Risk Center" sub="Coverage = Backlog ÷ Consensus. Sorted by financial impact."
         right={<>
           <Select aria-label="Type" value={type} onChange={(e) => setType(e.target.value)}><option value="">All types</option>{TYPES.map((t) => <option key={t} value={t}>{typeLabel(t)}</option>)}</Select>

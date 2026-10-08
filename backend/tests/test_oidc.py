@@ -34,12 +34,13 @@ def idp():
     s.auth_mode, s.oidc_jwks_url, s.oidc_issuer, s.oidc_audience = "oidc", f"http://127.0.0.1:{srv.server_port}/jwks", "https://idp.test", "oem-app"
     import app.core.security as sec
     sec._jwks_client = None
-    Base.metadata.drop_all(engine); Base.metadata.create_all(engine)
+    from sqlalchemy import delete
+    with SessionLocal(None) as db:
+        db.execute(delete(User)); db.commit()
     yield lambda **c: jwt.encode({"iss": "https://idp.test", "aud": "oem-app", "exp": int(time.time()) + 300, **c}, key, algorithm="RS256", headers={"kid": "k1"})
     srv.shutdown()
     s.auth_mode, s.oidc_jwks_url, s.oidc_issuer, s.oidc_audience = old
     sec._jwks_client = None
-    Base.metadata.drop_all(engine)
 
 
 def test_oidc_accepts_valid_token_and_jit_provisions_role(idp):
@@ -48,7 +49,7 @@ def test_oidc_accepts_valid_token_and_jit_provisions_role(idp):
         r = c.get("/api/v1/auth/me", headers={"Authorization": "Bearer " + idp(sub="abc-123", email="ann@corp.com", name="Ann", roles=["planner"])})
         assert r.status_code == 200 and r.json()["email"] == "ann@corp.com" and r.json()["role"] == "planner"
         assert c.get("/api/v1/auth/me", headers={"Authorization": "Bearer " + idp(email="bob@corp.com", roles=["superuser"])}).json()["role"] == "viewer"  # unknown role -> least privilege
-    with SessionLocal() as s:
+    with SessionLocal(None) as s:
         assert s.execute(select(User).where(User.email == "ann@corp.com")).scalar_one().role == "planner"
 
 

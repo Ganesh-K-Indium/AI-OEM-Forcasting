@@ -23,7 +23,7 @@ Every endpoint is `async def`. I/O CRUD uses `AsyncSession` (`in_session`); CPU-
 AI baseline immutable; overrides are revisions; deviation > 60% requires a ≥15-char comment; cycle OPEN→FORECASTED→CONSENSUS→LOCKED; lock writes frozen `ConsensusPoint` rows; FVA vs AI and vs naive with bootstrap CI; SHA-256 hash-chained audit log (Postgres advisory lock serialises writers).
 
 ## Data stores
-Postgres + pgvector (embeddings for fuzzy mapping, HNSW index); SQLite for dev/tests (numpy cosine fallback); Redis for Celery.
+Postgres + pgvector (embeddings for fuzzy mapping, HNSW index) — the only supported database, including tests; Redis for Celery.
 
 ## Frontend
 Next.js 14 App Router, Tailwind, Radix, Recharts, TanStack Query. Types: `frontend/src/lib/types.ts` (hand-mirrored) and `npm run gen:types` (openapi-typescript → `api-schema.d.ts`).

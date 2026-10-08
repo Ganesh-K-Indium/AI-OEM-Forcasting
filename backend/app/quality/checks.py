@@ -62,13 +62,28 @@ def run_dq(session: Session, cycle_month: date, horizon: int = 12, persist: bool
     out = int((np.abs(np.log((asp / med).clip(1e-6))) > 1.0).sum())
     res.append(_r("asp_outliers", "WARN", out == 0, f"{out} OEM-product-months have ASP more than 2.7x away from the product median", out, 0))
     # CRM / backlog / capacity freshness
-    snap = session.execute(select(func.count()).select_from(OpportunitySnapshot).where(OpportunitySnapshot.snapshot_month == cycle_month)).scalar()
-    res.append(_r("crm_snapshot_current", "WARN", snap > 0, f"{snap} opportunity snapshots for {cycle_month:%Y-%m} (commercial uplift needs the current snapshot)", snap, 1))
-    bl = session.execute(select(func.count()).select_from(BacklogSnapshot).where(BacklogSnapshot.snapshot_month == cycle_month)).scalar()
-    res.append(_r("backlog_snapshot_current", "WARN", bl > 0, f"{bl} backlog rows for snapshot {cycle_month:%Y-%m}", bl, 1))
-    want = {add_months(cycle_month, i) for i in range(1, horizon + 1)}
-    have = {mo for (mo,) in session.execute(select(CapacityAllocation.month).distinct())}
-    res.append(_r("capacity_coverage", "WARN", want <= have, f"capacity allocation defined for {len(want & have)}/{horizon} forecast months", len(want & have), horizon))
+    def total(model) -> int:
+        return int(session.execute(select(func.count()).select_from(model)).scalar() or 0)
+
+    def n_na(name, msg):
+        res.append(_r(name, "INFO", True, msg))
+
+    if total(OpportunitySnapshot) == 0:
+        n_na("crm_snapshot_current", "no CRM data in this workspace - commercial uplift and pipeline risk are disabled")
+    else:
+        snap = session.execute(select(func.count()).select_from(OpportunitySnapshot).where(OpportunitySnapshot.snapshot_month == cycle_month)).scalar()
+        res.append(_r("crm_snapshot_current", "WARN", snap > 0, f"{snap} opportunity snapshots for {cycle_month:%Y-%m} (commercial uplift needs the current snapshot)", snap, 1))
+    if total(BacklogSnapshot) == 0:
+        n_na("backlog_snapshot_current", "no backlog data in this workspace - coverage / revenue-gap alerts are disabled")
+    else:
+        bl = session.execute(select(func.count()).select_from(BacklogSnapshot).where(BacklogSnapshot.snapshot_month == cycle_month)).scalar()
+        res.append(_r("backlog_snapshot_current", "WARN", bl > 0, f"{bl} backlog rows for snapshot {cycle_month:%Y-%m}", bl, 1))
+    if total(CapacityAllocation) == 0:
+        n_na("capacity_coverage", "no capacity data in this workspace - supply-bottleneck alerts are disabled")
+    else:
+        want = {add_months(cycle_month, i) for i in range(1, horizon + 1)}
+        have = {mo for (mo,) in session.execute(select(CapacityAllocation.month).distinct())}
+        res.append(_r("capacity_coverage", "WARN", want <= have, f"capacity allocation defined for {len(want & have)}/{horizon} forecast months", len(want & have), horizon))
     return _persist(session, res, persist)
 
 

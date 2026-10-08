@@ -9,23 +9,39 @@ pytestmark = pytest.mark.slow
 warnings.filterwarnings("ignore")
 
 
+WS: dict = {}
+
+
 @pytest.fixture(scope="module")
 def client():
-    from app.core.db import SessionLocal
-    from app.data.seed import seed_demo
+    """Boot the API, create a synthetic workspace through it and seed it with a real background job (fast mode)."""
+    import time
+
     from app.main import app
 
-    with SessionLocal() as s:
-        seed_demo(s, None, replay_cycles=2, fast=True)
-        s.commit()
     with TestClient(app) as c:
+        h = login(c, "admin@demo.local")
+        r = c.post("/api/v1/workspaces", json=dict(name="E2E synthetic", kind="synthetic"), headers=h)
+        assert r.status_code == 201, r.text
+        WS.update(r.json())
+        hh = {**h, "X-Workspace": WS["slug"]}
+        j = c.post("/api/v1/admin/jobs", json=dict(job_type="seed_demo", params=dict(replay_cycles=2, fast=True)), headers=hh)
+        assert j.status_code == 202, j.text
+        for _ in range(400):
+            st = c.get(f"/api/v1/admin/jobs/{j.json()['id']}", headers=hh).json()
+            if st["state"] in ("SUCCESS", "FAILED"):
+                break
+            time.sleep(1.5)
+        assert st["state"] == "SUCCESS", st.get("error")
         yield c
+        c.delete(f"/api/v1/workspaces/{WS['id']}", headers=h)
 
 
 def login(c, email):
     r = c.post("/api/v1/auth/login", json={"email": email, "password": "demo1234"})
     assert r.status_code == 200, r.text
-    return {"Authorization": f"Bearer {r.json()['access_token']}"}
+    h = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    return {**h, "X-Workspace": WS["slug"]} if WS else h
 
 
 def test_auth_required_and_rbac(client):
@@ -37,7 +53,7 @@ def test_auth_required_and_rbac(client):
 
 
 def test_meta_is_labelled_synthetic(client):
-    m = client.get("/api/v1/meta").json()
+    m = client.get("/api/v1/meta", headers={"X-Workspace": WS["slug"]}).json()
     assert m["synthetic_mode"] and m["label"] == "[SYNTHETIC DEMO MODE]" and m["current_run_id"]
 
 
@@ -88,7 +104,7 @@ def test_override_flow_preserves_ai_and_updates_consensus(client):
 
 def test_rep_scope_enforced_via_api(client):
     h = login(client, "rep.amer@demo.local")
-    run = client.get("/api/v1/meta").json()["current_run_id"]
+    run = client.get("/api/v1/meta", headers={"X-Workspace": WS["slug"]}).json()["current_run_id"]
     r = client.post("/api/v1/overrides", headers=h, json=dict(run_id=run, oem="BOSCH", region="EMEA", product="ALL", month="2026-10-01", basis="UNITS", value=10, reason_code="NEW_WIN"))
     assert r.status_code == 403
 
@@ -136,7 +152,7 @@ def test_detail_drilldown(client):
 
 def test_lock_freezes_cycle(client):
     h = login(client, "planner@demo.local")
-    run = client.get("/api/v1/meta").json()["current_run_id"]
+    run = client.get("/api/v1/meta", headers={"X-Workspace": WS["slug"]}).json()["current_run_id"]
     assert client.post(f"/api/v1/runs/{run}/lock", headers=h).status_code == 200
     r = client.post("/api/v1/overrides", headers=h, json=dict(run_id=run, oem="APPLE", region="AMER", product="ALL", month="2026-10-01", basis="UNITS", value=5, reason_code="NEW_WIN"))
     assert r.status_code == 422 and "locked" in r.text
@@ -157,3 +173,61 @@ def test_concurrent_async_requests_do_not_block(client):
             return await asyncio.gather(*reqs)
 
     assert all(r.status_code == 200 for r in asyncio.run(go()))
+
+
+def test_workspaces_are_isolated_and_adapt_to_data(client):
+    h = login(client, "admin@demo.local")
+    empty = client.post("/api/v1/workspaces", json=dict(name="Empty research", kind="custom"), headers=h).json()
+    eh = {**h, "X-Workspace": empty["slug"]}
+    assert client.get("/api/v1/runs", headers=eh).json() == []  # nothing leaks from the seeded workspace
+    assert client.get("/api/v1/filters", headers=eh).json()["oems"] == []
+    assert client.get("/api/v1/meta", headers=eh).json()["capabilities"]["has_sales"] is False
+    full = client.get("/api/v1/meta", headers=h).json()
+    assert full["capabilities"]["has_crm"] and full["capabilities"]["has_backlog"] and full["capabilities"]["has_capacity"]
+    assert client.get("/api/v1/runs", headers={**h, "X-Workspace": "nope"}).status_code == 404
+    assert client.post("/api/v1/data/import", json=dict(source="files"), headers={**h, "X-Workspace": WS["slug"]}).status_code == 409  # synthetic workspaces cannot take uploads
+    names = [w["name"] for w in client.get("/api/v1/workspaces", headers=h).json()]
+    assert "Empty research" in names and "E2E synthetic" in names
+    assert client.delete(f"/api/v1/workspaces/{empty['id']}", headers=h).status_code == 204
+    viewer = login(client, "viewer@demo.local")
+    assert client.post("/api/v1/workspaces", json=dict(name="Nope", kind="custom"), headers=viewer).status_code == 403
+
+
+def test_upload_validate_import_via_api(client, tmp_path):
+    import io
+    import time
+
+    import numpy as np
+    import pandas as pd
+
+    h = login(client, "admin@demo.local")
+    ws = client.post("/api/v1/workspaces", json=dict(name="Upload research", kind="custom"), headers=h).json()
+    uh = {**h, "X-Workspace": ws["slug"]}
+    try:
+        rng = np.random.default_rng(2)
+        rows = [dict(period=m.strftime("%Y-%m-%d"), buyer=b, part=p, volume=float(80 + 15 * i + rng.normal(0, 4)), sales=float((80 + 15 * i) * (40 + 4 * j)))
+                for m in pd.date_range("2023-01-01", periods=28, freq="MS") for i, b in enumerate(["Orion", "Vega"]) for j, p in enumerate(["P1", "P2"])]
+        buf = io.BytesIO(pd.DataFrame(rows).to_csv(index=False).encode())
+        up = client.post("/api/v1/data/upload?role=sales", files={"file": ("my sales.csv", buf, "text/csv")}, headers=uh)
+        assert up.status_code == 200, up.text
+        up = up.json()
+        sug = up["suggested"]
+        assert sug["month"] == "period" and sug["customer"] == "buyer" and sug["product"] == "part" and sug["units"] == "volume" and sug["revenue"] == "sales"
+        spec = dict(file=up["file"], map=sug)
+        v = client.post("/api/v1/data/validate", json=dict(sales=spec), headers=uh).json()
+        assert v["ok"] and v["summary"]["months"] == 28 and v["summary"]["series"] == 4
+        j = client.post("/api/v1/data/import", json=dict(sales=spec, options=dict(forecast_mode="fast")), headers=uh)
+        assert j.status_code == 202, j.text
+        for _ in range(300):
+            st = client.get(f"/api/v1/admin/jobs/{j.json()['job_id']}", headers=uh).json()
+            if st["state"] in ("SUCCESS", "FAILED"):
+                break
+            time.sleep(1.5)
+        assert st["state"] == "SUCCESS", st.get("error")
+        m = client.get("/api/v1/meta", headers=uh).json()
+        assert m["workspace"]["status"] == "READY" and m["label"] == "CUSTOM DATA" and m["capabilities"]["has_forecast"] and not m["capabilities"]["has_backlog"]
+        d = client.get("/api/v1/dashboard", headers=uh).json()
+        assert d["kpis"]["total_consensus_revenue"] > 0 and d["kpis"]["backlog_coverage"] is None and d["synthetic"] is False
+        assert client.get("/api/v1/risk/alerts", headers=uh).json() == []
+    finally:
+        client.delete(f"/api/v1/workspaces/{ws['id']}", headers=h)

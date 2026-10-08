@@ -56,7 +56,7 @@ export default function Login() {
   const [busy, setBusy] = useState(false);
   const submit = async (e: React.FormEvent) => {
     e.preventDefault(); setBusy(true); setErr(undefined);
-    try { await login(email, password); router.replace("/dashboard"); } catch (x) { setErr((x as Error).message); } finally { setBusy(false); }
+    try { await login(email, password); router.replace("/workspaces"); } catch (x) { setErr((x as Error).message); } finally { setBusy(false); }
   };
   return (
     <div className="grid min-h-screen lg:grid-cols-[1.15fr_1fr]">

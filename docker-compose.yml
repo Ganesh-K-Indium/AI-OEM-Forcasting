@@ -1,5 +1,5 @@
 # Local/production-like stack:  docker compose up --build
-# First run: sign in as admin@demo.local / demo1234 → Admin → Jobs → seed_demo.
+# First run: sign in as admin@demo.local / demo1234 → Data → Generate synthetic data (or import your own).
 x-backend-env: &backend-env
   DATABASE_URL: postgresql+psycopg://oem:oem@postgres:5432/oem
   REDIS_URL: redis://redis:6379/0
@@ -25,14 +25,14 @@ services:
     build: { context: ./backend, args: { WITH_FOUNDATION: "${WITH_FOUNDATION:-1}" } }
     environment: *backend-env
     depends_on: { postgres: { condition: service_healthy }, redis: { condition: service_healthy } }
-    volumes: [artifacts:/app/data]
+    volumes: [artifacts:/app/data, "./backend/data/import:/app/data/import"]  # drop M5 / large files into backend/data/import/
     ports: ["8000:8000"]
   worker:
     build: { context: ./backend, args: { WITH_FOUNDATION: "${WITH_FOUNDATION:-1}" } }
     command: ["celery", "-A", "app.tasks.celery_app.celery_app", "worker", "--loglevel=INFO", "--concurrency=2"]
     environment: *backend-env
     depends_on: { api: { condition: service_healthy } }
-    volumes: [artifacts:/app/data]
+    volumes: [artifacts:/app/data, "./backend/data/import:/app/data/import"]
   frontend:
     build: { context: ./frontend, args: { NEXT_PUBLIC_API_URL: "${PUBLIC_API_URL:-http://localhost:8000}" } }
     depends_on: [api]

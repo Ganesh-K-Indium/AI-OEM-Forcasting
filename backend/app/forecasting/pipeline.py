@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from app.core.audit import audit
 from app.core.calendar import add_months
 from app.core.config import get_settings
+from app.core.workspace import workspace_kind
 from app.core.settings_store import get_setting
 from app.forecasting import data_access as da
 from app.mapping.service import load_mapping_table
@@ -92,7 +93,7 @@ def run_forecast(session: Session, cycle_month: date, kind: str = "CURRENT", mod
     cfg = get_settings()
     H = horizon or cfg.horizon
     pg = progress or (lambda f, m: None)
-    run = ForecastRun(id=str(uuid.uuid4()), cycle_month=cycle_month, horizon=H, kind=kind, status="RUNNING", is_synthetic=cfg.synthetic_mode,
+    run = ForecastRun(id=str(uuid.uuid4()), cycle_month=cycle_month, horizon=H, kind=kind, status="RUNNING", is_synthetic=workspace_kind(session) == "synthetic",
                       config={"mode": mode, "reconcile_method": cfg.reconcile_method, "mc_samples": cfg.mc_samples}, created_by=user)
     session.add(run)
     session.flush()
@@ -172,9 +173,12 @@ def _run(session: Session, run: ForecastRun, cycle_month: date, kind: str, mode:
     # ------------------------------------------------------------------ 5. commercial uplift (net of baseline)
     pg(0.68, "Commercial signal engine")
     champ_bottom = champ_bt[champ_bt.unique_id.isin(bottom_ids)]
-    net = com.estimate_net_factor(crm, bottom_ids, champ_bottom, H, seed=cfg.random_seed)
-    cm = com.train_commercial_model(crm, pd.Timestamp(cycle_month), cfg.random_seed)
-    up = com.compute_uplift(crm, pd.Timestamp(cycle_month), cm, bottom_ids, H, n_samples=cfg.mc_samples, seed=cfg.random_seed)
+    if crm.snaps.empty:
+        net, cm, up = com.no_crm_result(bottom_ids, pd.Timestamp(cycle_month), H, cfg.mc_samples)
+    else:
+        net = com.estimate_net_factor(crm, bottom_ids, champ_bottom, H, seed=cfg.random_seed)
+        cm = com.train_commercial_model(crm, pd.Timestamp(cycle_month), cfg.random_seed)
+        up = com.compute_uplift(crm, pd.Timestamp(cycle_month), cm, bottom_ids, H, n_samples=cfg.mc_samples, seed=cfg.random_seed)
     beta_h = np.array([net["beta"].get(bt_mod.bucket_of(h), 0.0) for h in range(1, H + 1)])
     gross_b = up.expected.to_numpy().T  # (m,H)
     gross_n = S @ gross_b  # (n,H)

@@ -45,6 +45,8 @@ class Meta(BaseModel):
     currency: str = "USD"
     units_label: str = "kunits"
     version: str
+    workspace: dict | None = None
+    capabilities: dict | None = None
 
 
 class RunOut(ORM):

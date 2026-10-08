@@ -10,10 +10,10 @@ from sqlalchemy.orm import Session
 
 from app.governance.consensus import build_consensus
 from app.ml.hierarchy import ALL, level_of
-from app.models.facts import CapacityAllocation, MappedSeries, Opportunity
+from app.models.facts import BacklogSnapshot, CapacityAllocation, MappedSeries, Opportunity
 from app.models.forecast import ForecastPoint, ForecastRun, ModelBenchmark, SeriesSegment, UpliftDetail
 from app.models.governance import AuditLog, ConsensusPoint, FvaResult, Override, PlanningCycle, RiskAlert
-from app.risk.engine import coverage_table
+from app.risk.engine import coverage_table, has_rows
 
 
 class NotFound(LookupError):
@@ -175,7 +175,7 @@ def dashboard(session: Session, run: ForecastRun) -> dict:
     n_ov = session.execute(select(func.count()).select_from(Override).where(Override.run_id == run.id, Override.status == "ACTIVE")).scalar()
     return dict(run_id=run.id, cycle_month=run.cycle_month, cycle_status=cyc.status if cyc else None, locked=run.locked_at is not None, synthetic=run.is_synthetic,
                 kpis=dict(total_consensus_revenue=ex["totals"]["consensus_revenue"], total_ai_revenue=ex["totals"]["ai_revenue"], consensus_vs_ai_pct=(ex["totals"]["consensus_revenue"] / ex["totals"]["ai_revenue"] - 1) if ex["totals"]["ai_revenue"] else None,
-                          backlog_coverage=bl / fc3 if fc3 else None, backlog_value_t3=bl, forecast_value_t3=fc3, revenue_at_risk=gap_supply, pipeline_at_risk=pipe,
+                          backlog_coverage=bl / fc3 if (fc3 and has_rows(session, BacklogSnapshot)) else None, backlog_value_t3=bl, forecast_value_t3=fc3, revenue_at_risk=gap_supply, pipeline_at_risk=pipe,
                           upside_potential=max(p90 - ex["totals"]["consensus_revenue"], 0.0), overall_wmape_realized=realized["ai_wmape"] if realized else None,
                           backtest_wmape=(run.summary or {}).get("headline", {}).get("champion_backtest_wmape"), active_overrides=int(n_ov), net_uplift_revenue=ex["totals"]["uplift_revenue"]),
                 ai_vs_actual=realized, trend=dict(history=ex["history"][-24:], forecast=ex["forecast"]),

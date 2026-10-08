@@ -1,17 +1,40 @@
+"""Tests run against a real PostgreSQL + pgvector (`make test-db` starts one on :5544).
+Every test works inside the throw-away workspace schema `ws_test`; shared tables (users, workspaces, jobs) live in `public`."""
 import os
 import tempfile
 import warnings
 from pathlib import Path
 
 _TMP = Path(tempfile.mkdtemp(prefix="oem_tests_"))
-os.environ.update(DATABASE_URL=f"sqlite:///{_TMP / 'test.db'}", ENVIRONMENT="test", ARTIFACT_DIR=str(_TMP / "artifacts"), ENABLE_CHRONOS="false",
-                  USE_CELERY="false", MC_SAMPLES="120", SYNTH_OPPORTUNITIES="1200", JWT_SECRET="test-secret-test-secret-test-secret-123")
+os.environ.update(DATABASE_URL=os.environ.get("TEST_DATABASE_URL", "postgresql+psycopg://oem:oem@localhost:5544/oem_test"), ENVIRONMENT="test",
+                  ARTIFACT_DIR=str(_TMP / "artifacts"), IMPORT_DIR=str(_TMP / "import"), ENABLE_CHRONOS="false", USE_CELERY="false", MC_SAMPLES="120",
+                  SYNTH_OPPORTUNITIES="1200", JWT_SECRET="test-secret-test-secret-test-secret-123", BOOTSTRAP_DEMO_WORKSPACE="false")
 warnings.filterwarnings("ignore")
 
 import pytest  # noqa: E402
 
-from app.core.db import Base, SessionLocal, engine  # noqa: E402
 import app.models  # noqa: E402,F401
+from app.core import workspace as wsmod  # noqa: E402
+from app.core.db import Base, SessionLocal, current_schema, engine, shared_tables  # noqa: E402
+
+TEST_SCHEMA = "ws_test"
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _shared_schema():
+    wsmod.ensure_extensions()
+    Base.metadata.drop_all(engine, tables=shared_tables())
+    Base.metadata.create_all(engine, tables=shared_tables())
+    wsmod.drop_schema(TEST_SCHEMA)
+    wsmod.provision_schema(TEST_SCHEMA)
+    current_schema.set(TEST_SCHEMA)
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _bind_workspace():
+    current_schema.set(TEST_SCHEMA)
+    yield
 
 
 @pytest.fixture(scope="session")
@@ -25,11 +48,9 @@ def bundle():
 
 @pytest.fixture()
 def fresh_db():
-    Base.metadata.drop_all(engine)
-    Base.metadata.create_all(engine)
+    wsmod.reset_workspace(TEST_SCHEMA)
     with SessionLocal() as s:
         yield s
-    Base.metadata.drop_all(engine)
 
 
 @pytest.fixture(scope="session")
@@ -38,8 +59,8 @@ def loaded_db(bundle):
     from app.data import loader
     from app.mapping import service
 
-    Base.metadata.drop_all(engine)
-    Base.metadata.create_all(engine)
+    current_schema.set(TEST_SCHEMA)
+    wsmod.reset_workspace(TEST_SCHEMA)
     with SessionLocal() as s:
         loader.ensure_demo_users(s)
         loader.load_bundle(s, bundle)
