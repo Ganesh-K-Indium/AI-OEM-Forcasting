@@ -41,6 +41,8 @@ def submit_job(session: Session, job_type: str, params: dict | None, user: str) 
 def _update(job_id: str, **kw) -> None:
     with SessionLocal() as s:
         j = s.get(Job, job_id)
+        if j is None:
+            return
         for k, v in kw.items():
             setattr(j, k, v)
         s.commit()

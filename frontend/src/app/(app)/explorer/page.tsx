@@ -43,6 +43,7 @@ function OverrideForm({ ex, onDone }: { ex: Explorer; onDone: () => void }) {
   );
 }
 
+const cm = (m: any) => (m && typeof m === "object" ? `win-prob model · OOF AUC ${m.oof_auc != null ? fmtNum(m.oof_auc, 2) : "n/a"} · ${m.closed_opps ?? "?"} closed opps` : m);
 type DTab = "drivers" | "opps" | "overrides" | "fva" | "audit" | "coverage";
 function DetailSheet({ open, onClose, oem, region, product }: { open: boolean; onClose: () => void; oem: string; region: string; product: string }) {
   const { runId } = useRun();
@@ -52,7 +53,7 @@ function DetailSheet({ open, onClose, oem, region, product }: { open: boolean; o
   const drv: [string, any][] = d ? [["Segment", d.drivers.segment], ["Champion model", d.explorer.champion_model], ["ADI", d.drivers.adi != null ? fmtNum(d.drivers.adi, 2) : null], ["CV²", d.drivers.cv2 != null ? fmtNum(d.drivers.cv2, 2) : null],
     ["Seasonal strength", d.drivers.seasonality_strength != null ? fmtNum(d.drivers.seasonality_strength, 2) : null], ["ACF(12)", d.drivers.acf12 != null ? fmtNum(d.drivers.acf12, 2) : null],
     ["Exogenous score", d.drivers.exog_strength != null ? fmtNum(d.drivers.exog_strength, 2) : null], ["Uplift β", d.drivers.net_uplift_beta != null ? fmtNum(d.drivers.net_uplift_beta, 2) : null],
-    ["Commercial model", d.drivers.commercial_model]] : [];
+    ["Commercial model", cm(d.drivers.commercial_model)]] : [];
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()} title={`Detail · ${oem} / ${region} / ${product}`} wide>
       {q.isLoading && <Spinner />}{q.error && <ErrorBox error={q.error} />}

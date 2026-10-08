@@ -34,6 +34,10 @@ def _bootstrap(s) -> None:
     if s.environment != "prod" or s.database_url.startswith("sqlite"):
         Base.metadata.create_all(engine)  # dev/test convenience; production uses `alembic upgrade head`
     with SessionLocal() as db:
+        if db.get_bind().dialect.name == "postgresql":  # serialise bootstrap across uvicorn workers / replicas
+            from sqlalchemy import text
+
+            db.execute(text("SELECT pg_advisory_xact_lock(727401)"))
         from app.core.settings_store import seed_defaults
         from app.mapping.rules import seed_default_rules
         from app.risk.engine import seed_default_thresholds

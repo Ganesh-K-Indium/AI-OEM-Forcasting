@@ -16,7 +16,7 @@ from app.models.facts import (BacklogSnapshot, CapacityAllocation, Contract, Opp
 from app.models.ops import User
 from app.models.reference import Account, FxRate, Oem, OemAlias, OemIdentifier, ProductLine, Region, SystemSetting
 
-KEEP_TABLES = {"users"}
+KEEP_TABLES = {"users", "jobs"}  # jobs must survive: the seed job itself is tracked there
 
 
 def _records(df: pd.DataFrame, cols: list[str]) -> list[dict]:

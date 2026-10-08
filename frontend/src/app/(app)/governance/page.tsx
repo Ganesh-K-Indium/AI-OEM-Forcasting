@@ -90,7 +90,7 @@ function AuditTab() {
     <Card>
       <CardHeader title="Audit log" sub="SHA-256 hash chain; each entry commits to the previous one."
         right={<div className="flex items-center gap-2">{v.data && <Badge tone={v.data.intact ? "good" : "crit"}>{v.data.intact ? "Chain intact" : `Chain broken at #${v.data.first_bad_id}`}</Badge>}
-          <Select aria-label="Entity" value={entity} onChange={(e) => setEntity(e.target.value)}><option value="">All entities</option>{["override", "mapping", "cycle", "run", "user", "setting", "alert"].map((e) => <option key={e}>{e}</option>)}</Select></div>} />
+          <Select aria-label="Entity" value={entity} onChange={(e) => setEntity(e.target.value)}><option value="">All entities</option>{["override", "mapping", "mapping_rule", "account", "oem", "planning_cycle", "forecast_run", "risk_alert", "risk_threshold", "setting", "user"].map((e) => <option key={e}>{e}</option>)}</Select></div>} />
       {q.isLoading ? <Spinner /> : q.error ? <ErrorBox error={q.error} /> : (
         <Table><thead><tr><Th>#</Th><Th>Time</Th><Th>User</Th><Th>Action</Th><Th>Entity</Th><Th>Hash</Th></tr></thead>
           <tbody>{q.data?.map((a) => <tr key={a.id}><Td>{a.id}</Td><Td className="whitespace-nowrap text-xs">{fmtTs(a.ts)}</Td><Td className="text-xs">{a.user_id}</Td><Td>{a.action}</Td><Td className="text-xs">{a.entity_type} {a.entity_id}</Td><Td className="font-mono text-[10px] text-muted" title={a.hash}>{a.hash.slice(0, 14)}…</Td></tr>)}</tbody></Table>

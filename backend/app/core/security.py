@@ -59,7 +59,7 @@ async def current_user(cred: Annotated[HTTPAuthorizationCredentials | None, Depe
         claims = await anyio.to_thread.run_sync(decode_token, cred.credentials)
     except jwt.PyJWTError as e:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, f"Invalid token: {e}") from e
-    email = claims.get("sub") or claims.get("email")
+    email = claims.get("email") or claims.get("sub")
     user = (await db.execute(select(User).where(User.email == email, User.is_active))).scalar_one_or_none()
     if user is None and get_settings().auth_mode == "oidc":  # JIT-provision from the IdP role claim
         role = claims.get(get_settings().oidc_role_claim) or ["viewer"]
