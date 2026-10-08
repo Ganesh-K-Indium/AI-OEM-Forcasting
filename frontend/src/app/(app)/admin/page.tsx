@@ -8,40 +8,8 @@ import { useRun } from "@/lib/run-context";
 import { useWorkspace } from "@/lib/workspace-context";
 import type { Dq, Drift, Job, Setting, User } from "@/lib/types";
 import { Badge, Button, Card, CardHeader, Empty, ErrorBox, Input, Label, PageHeader, Select, Spinner, Table, Tabs, Td, Th } from "@/components/ui";
-import { fmtNum, fmtTs } from "@/lib/utils";
-
-const JOB_TYPES = ["seed_demo", "import_dataset", "run_forecast", "mapping_pipeline", "materialize", "refresh_risk", "compute_fva", "run_dq"];
-const jobTone = (s: string) => (s === "SUCCESS" ? "good" : s === "FAILED" ? "crit" : s === "RUNNING" ? "info" : "neutral") as "good" | "crit" | "info" | "neutral";
-
-function Jobs() {
-  const { can } = useAuth(); const qc = useQueryClient(); const { runId } = useRun(); const { current } = useWorkspace(); const seedable = current?.kind === "synthetic";
-  const q = useQuery({ queryKey: ["jobs"], queryFn: () => get<Job[]>("/admin/jobs"), refetchInterval: 30_000 });
-  const [type, setType] = useState("run_forecast"); const [fast, setFast] = useState(true);
-  const m = useMutation({
-    mutationFn: () => post<Job>("/admin/jobs", { job_type: type, params: type === "seed_demo" ? { fast, replay_cycles: fast ? 2 : 6 } : type === "run_forecast" ? { mode: fast ? "fast" : "full" } : {} }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["jobs"] }),
-  });
-  const done = q.data?.some((j) => j.state === "SUCCESS");
-  return (
-    <Card>
-      <CardHeader title="Jobs" sub="Long-running work executes off the request path (Celery worker or job thread)."
-        right={can("planner") && <div className="flex items-center gap-2"><Select aria-label="Job type" value={type} onChange={(e) => setType(e.target.value)} >{JOB_TYPES.filter((t) => t !== "import_dataset" && (t !== "seed_demo" || (can("admin") && seedable))).map((t) => <option key={t}>{t}</option>)}</Select>
-          <label className="flex items-center gap-1 text-xs"><input type="checkbox" checked={fast} onChange={(e) => setFast(e.target.checked)} />fast</label>
-          <Button disabled={m.isPending} onClick={() => m.mutate()}>Run</Button></div>} />
-      {m.error && <div role="alert" className="p-3 text-sm text-crit">{(m.error as Error).message}</div>}
-      {!done && !q.data?.length && <p className="p-3 text-sm text-ink2">Fresh install? Choose <b>seed_demo</b> (fast) to generate synthetic data and a first forecast run{runId ? "" : " — none exists yet"}.</p>}
-      {q.isLoading ? <Spinner /> : q.error ? <ErrorBox error={q.error} /> : (
-        <Table><thead><tr><Th>Type</Th><Th>State</Th><Th>Progress</Th><Th>Message</Th><Th>Created</Th><Th>By</Th></tr></thead>
-          <tbody>{q.data?.map((j) => (
-            <tr key={j.id}><Td>{j.job_type}</Td><Td><Badge tone={jobTone(j.state)}>{j.state}</Badge></Td>
-              <Td className="w-40"><div className="h-2 w-full rounded bg-line" role="progressbar" aria-valuenow={Math.round(j.progress * 100)} aria-valuemin={0} aria-valuemax={100}><div className="h-2 rounded bg-brand" style={{ width: `${j.progress * 100}%` }} /></div></Td>
-              <Td className="max-w-[320px] text-xs">{j.error ? <details><summary className="cursor-pointer text-crit">Failed</summary><pre className="whitespace-pre-wrap">{j.error}</pre></details> : j.message}</Td>
-              <Td className="whitespace-nowrap text-xs">{fmtTs(j.created_at)}</Td><Td className="text-xs">{j.created_by}</Td></tr>
-          ))}</tbody></Table>
-      )}
-    </Card>
-  );
-}
+import { fmtNum } from "@/lib/utils";
+import { JobsPanel } from "@/components/jobs-panel";
 
 function Quality() {
   const { runId } = useRun();
@@ -117,7 +85,7 @@ export default function AdminPage() {
     <div>
       <PageHeader title="Admin" sub={<>Users are platform-wide. Jobs, data quality, drift and settings apply to the workspace <b>{current?.name ?? "—"}</b> (change it with the workspace selector in the top bar).</>} />
       <div className="mb-4"><Tabs value={tab} onChange={setTab} tabs={tabs} /></div>
-      {tab === "jobs" && <Jobs />}{tab === "quality" && <Quality />}{tab === "settings" && <Settings />}{tab === "users" && <Users />}
+      {tab === "jobs" && <JobsPanel />}{tab === "quality" && <Quality />}{tab === "settings" && <Settings />}{tab === "users" && <Users />}
     </div>
   );
 }

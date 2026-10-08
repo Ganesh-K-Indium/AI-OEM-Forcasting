@@ -82,7 +82,7 @@ export interface Allocation { oem_code: string; region_code: string; allocation_
 export interface Rule { id: number; name: string; rule_type: string; priority: number; confidence: number; pattern: string | null; target_oem_code: string | null; target_region: string | null; enabled: boolean }
 export interface Oem { id: number; code: string; name: string; identifiers: Record<string, any>[]; aliases: string[] }
 
-export interface Job { id: string; job_type: string; state: string; progress: number; message: string | null; params: Record<string, any> | null; result: Record<string, any> | null; error: string | null; created_by: string | null; created_at: string; finished_at: string | null }
+export interface Job { id: string; job_type: string; state: string; progress: number; message: string | null; params: Record<string, any> | null; result: Record<string, any> | null; error: string | null; created_by: string | null; created_at: string; started_at?: string | null; finished_at: string | null }
 export interface Dq { check_name: string; severity: string; passed: boolean; metric: number | null; threshold: number | null; message: string; run_ts: string }
 export interface Drift { run_id: string; kind: string; name: string; value: number; threshold: number; breached: boolean }
 export interface Setting { key: string; value: any; description: string | null }
