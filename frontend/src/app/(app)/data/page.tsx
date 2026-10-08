@@ -7,7 +7,7 @@ import { download, get, post, upload } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useWorkspace } from "@/lib/workspace-context";
 import type { Capabilities, Job } from "@/lib/types";
-import { Badge, Button, Card, CardHeader, ErrorBox, Input, Label, PageHeader, Select, Spinner, Table, Td, Th } from "@/components/ui";
+import { Badge, Button, Card, CardHeader, ErrorBox, Input, Label, PageHeader, Select, Spinner, Table, Tabs, Td, Th } from "@/components/ui";
 import { cn, fmtNum } from "@/lib/utils";
 
 interface Status {
@@ -68,6 +68,62 @@ function CapabilityStrip({ c }: { c: Capabilities }) {
         </div>
       ))}
     </div>
+  );
+}
+
+
+// ------------------------------------------------------------------------------------------------ preview
+interface Grid { columns: string[]; rows: (string | number | null)[][] }
+interface Page extends Grid { table: string; total: number; limit: number; offset: number }
+const PREVIEW_TABS = [
+  { id: "mapped", label: "Used for forecasting", note: "OEM × region × product × month: the exact series the models train on (revenue in USD)." },
+  { id: "sales", label: "Sales rows", note: "The sales history as stored, one row per customer, product and month." },
+  { id: "mapping", label: "Customer → OEM", note: "How each customer was assigned to an OEM and region." },
+  { id: "backlog", label: "Backlog", note: "Open orders by delivery month." },
+  { id: "capacity", label: "Capacity", note: "Supply capacity by region, product and month." },
+] as const;
+type PreviewId = typeof PREVIEW_TABS[number]["id"];
+const cell = (col: string, v: string | number | null) => {
+  if (v === null || v === undefined) return "—";
+  if (typeof v === "number") return /pct|confidence/.test(col) ? v.toFixed(2) : fmtNum(v, Number.isInteger(v) ? 0 : 1);
+  return /month/.test(col) && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v.slice(0, 7) : v;
+};
+function GridTable({ g }: { g: Grid }) {
+  return (
+    <Table><thead><tr>{g.columns.map((c) => <Th key={c} className={/units|revenue|value|capacity|pct|confidence|series/.test(c) ? "text-right" : ""}>{c.replace(/_/g, " ")}</Th>)}</tr></thead>
+      <tbody>{g.rows.map((r, i) => <tr key={i}>{r.map((v, j) => <Td key={j} className={cn("whitespace-nowrap", typeof v === "number" && "text-right tabular-nums")}>{cell(g.columns[j], v)}</Td>)}</tr>)}</tbody></Table>
+  );
+}
+function DataPreview({ c }: { c: Capabilities }) {
+  const avail: Record<PreviewId, number> = { mapped: c.mapped_rows, sales: c.sales, mapping: c.accounts, backlog: c.backlog, capacity: c.capacity };
+  const tabs = PREVIEW_TABS.filter((t) => avail[t.id] > 0);
+  const [tab, setTab] = useState<PreviewId>("mapped"); const [offset, setOffset] = useState(0); const size = 25;
+  const active = tabs.find((t) => t.id === tab) ?? tabs[0];
+  const over = useQuery({ queryKey: ["data-preview", "overview"], queryFn: () => get<Grid>("/data/overview"), enabled: c.has_mapped });
+  const pg = useQuery({ queryKey: ["data-preview", active?.id, offset], queryFn: () => get<Page>("/data/preview", { table: active!.id, limit: size, offset }), enabled: !!active, placeholderData: (p) => p });
+  if (!active) return null;
+  return (
+    <>
+      {over.data && over.data.rows.length > 0 && (
+        <Card><CardHeader title="Top OEMs in this data" sub="Largest by revenue, as the forecast sees them." /><GridTable g={over.data} /></Card>
+      )}
+      <Card>
+        <CardHeader title="Data in this workspace" sub={active.note} />
+        <div className="px-4"><Tabs value={active.id} onChange={(t) => { setTab(t); setOffset(0); }} tabs={tabs.map(({ id, label }) => ({ id, label: `${label} (${fmtNum(avail[id], 0)})` }))} /></div>
+        {pg.isLoading ? <Spinner /> : pg.error ? <ErrorBox error={pg.error} /> : pg.data && (
+          <>
+            <div className="overflow-x-auto"><GridTable g={pg.data} /></div>
+            <div className="flex items-center justify-between border-t px-4 py-2 text-xs text-ink2">
+              <span>Rows {fmtNum(pg.data.offset + 1, 0)}–{fmtNum(Math.min(pg.data.offset + size, pg.data.total), 0)} of {fmtNum(pg.data.total, 0)} · newest first</span>
+              <span className="flex gap-2">
+                <Button variant="outline" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - size))}>Previous</Button>
+                <Button variant="outline" disabled={offset + size >= pg.data.total} onClick={() => setOffset(offset + size)}>Next</Button>
+              </span>
+            </div>
+          </>
+        )}
+      </Card>
+    </>
   );
 }
 
@@ -305,6 +361,7 @@ export default function DataPage() {
       <Card><CardHeader title="What this workspace contains" sub="Pages and engines switch features on or off based on what is here." /><div className="p-4"><CapabilityStrip c={c} /></div></Card>
       {!admin ? <Card className="p-4 text-sm text-ink2">Only administrators can load or replace data. Ask an admin, or switch to a workspace that already has data.</Card>
         : w.kind === "synthetic" ? <SyntheticPanel hasData={c.has_sales} /> : w.kind === "m5" ? <M5Panel st={st} /> : <Wizard st={st} />}
+      {c.has_sales && <DataPreview c={c} />}
     </div>
   );
 }

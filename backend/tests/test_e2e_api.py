@@ -229,5 +229,12 @@ def test_upload_validate_import_via_api(client, tmp_path):
         d = client.get("/api/v1/dashboard", headers=uh).json()
         assert d["kpis"]["total_consensus_revenue"] > 0 and d["kpis"]["backlog_coverage"] is None and d["synthetic"] is False
         assert client.get("/api/v1/risk/alerts", headers=uh).json() == []
+        pv = client.get("/api/v1/data/preview?table=mapped&limit=5", headers=uh).json()
+        assert pv["total"] == 4 * 28 and len(pv["rows"]) == 5 and pv["columns"][:3] == ["month", "oem", "region"]
+        assert pv["rows"][0][0] >= pv["rows"][-1][0]  # newest first
+        assert client.get("/api/v1/data/preview?table=sales", headers=uh).json()["total"] == 4 * 28
+        assert client.get("/api/v1/data/preview?table=users", headers=uh).status_code == 404
+        ov = client.get("/api/v1/data/overview", headers=uh).json()
+        assert {r[0] for r in ov["rows"]} == {"ORION", "VEGA"} and ov["columns"][0] == "oem"
     finally:
         client.delete(f"/api/v1/workspaces/{ws['id']}", headers=h)

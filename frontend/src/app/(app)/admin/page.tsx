@@ -1,5 +1,6 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { get, post, put } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -107,12 +108,14 @@ function Users() {
 }
 
 export default function AdminPage() {
-  const { can } = useAuth(); const { current } = useWorkspace();
+  const { can, user } = useAuth(); const { current } = useWorkspace(); const router = useRouter();
+  useEffect(() => { if (user && user.role !== "admin") router.replace("/workspaces"); }, [user, router]);
   const [tab, setTab] = useState<"jobs" | "quality" | "settings" | "users">("jobs");
   const tabs = [{ id: "jobs" as const, label: "Jobs" }, { id: "quality" as const, label: "Data quality & drift" }, { id: "settings" as const, label: "Settings" }, ...(can("admin") ? [{ id: "users" as const, label: "Users" }] : [])];
+  if (user?.role !== "admin") return null;
   return (
     <div>
-      <PageHeader title="Admin" sub={<>Users are platform-wide. Jobs, data quality, drift and settings apply to the workspace <b>{current?.name ?? "—"}</b> (switch it on the Workspaces page).</>} />
+      <PageHeader title="Admin" sub={<>Users are platform-wide. Jobs, data quality, drift and settings apply to the workspace <b>{current?.name ?? "—"}</b> (change it with the workspace selector in the top bar).</>} />
       <div className="mb-4"><Tabs value={tab} onChange={setTab} tabs={tabs} /></div>
       {tab === "jobs" && <Jobs />}{tab === "quality" && <Quality />}{tab === "settings" && <Settings />}{tab === "users" && <Users />}
     </div>

@@ -19,8 +19,9 @@ const WS_NAV = [
   { href: "/governance", label: "Governance", icon: Scale },
   { href: "/mapping", label: "Mapping", icon: GitMerge },
 ];
-const GLOBAL_PATHS = ["/workspaces", "/admin"];
-const isGlobal = (path: string) => GLOBAL_PATHS.some((p) => path.startsWith(p));
+// Only the workspace lobby is workspace-less. Admin has platform-wide parts (users) and workspace parts (jobs, DQ, settings),
+// so it keeps the workspace switcher and the workspace navigation: no round trip through the lobby.
+const isGlobal = (path: string) => path.startsWith("/workspaces");
 
 const KIND_LABEL = { synthetic: "Synthetic", m5: "M5", custom: "Custom" } as const;
 
@@ -46,8 +47,8 @@ function Topbar() {
       ) : null}
       <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2">
         <div className="flex flex-wrap items-center gap-3 text-sm">
-          {isGlobal(path) ? <span className="text-ink2">{path.startsWith("/admin") ? "Platform administration" : "All workspaces"}</span> : <>
-          <FolderKanban size={16} className="text-brand" />
+          {isGlobal(path) ? <span className="text-ink2">All workspaces</span> : <>
+          {path.startsWith("/admin") && <span className="font-medium">Admin ·</span>}<FolderKanban size={16} className="text-brand" />
           <Select aria-label="Workspace" value={current?.slug ?? ""} onChange={(e) => select(e.target.value)} className="max-w-[220px] font-medium">
             {workspaces.length === 0 && <option value="">No workspace</option>}
             {workspaces.map((w) => <option key={w.id} value={w.slug}>{w.name} · {KIND_LABEL[w.kind]}</option>)}
@@ -124,6 +125,8 @@ function NavLink({ href, label, icon: I, path }: { href: string; label: string; 
 function Frame({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const { current } = useWorkspace();
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const inside = !isGlobal(path) && !!current;
   return (
     <div className="flex min-h-screen">
@@ -137,12 +140,12 @@ function Frame({ children }: { children: React.ReactNode }) {
             {WS_NAV.map((n) => <NavLink key={n.href} {...n} path={path} />)}
           </div>
         )}
-        <div className="mt-auto border-t pt-2"><NavLink href="/admin" label="Admin" icon={Settings} path={path} /></div>
+        {isAdmin && <div className="mt-auto border-t pt-2"><NavLink href="/admin" label="Admin" icon={Settings} path={path} /></div>}
       </nav>
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar />
         <nav aria-label="Primary mobile" className="flex gap-1 overflow-x-auto border-b px-2 py-1 md:hidden">
-          {[{ href: "/workspaces", label: "Workspaces" }, ...(inside ? WS_NAV : []), { href: "/admin", label: "Admin" }].map(({ href, label }) =>
+          {[{ href: "/workspaces", label: "Workspaces" }, ...(inside ? WS_NAV : []), ...(isAdmin ? [{ href: "/admin", label: "Admin" }] : [])].map(({ href, label }) =>
             <Link key={href} href={href} className={cn("whitespace-nowrap rounded px-2 py-1 text-xs", path.startsWith(href) ? "bg-brand/15 font-semibold" : "text-ink2")}>{label}</Link>)}
         </nav>
         <main className="flex-1 p-4 md:p-6"><Gate>{children}</Gate></main>

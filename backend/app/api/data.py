@@ -10,7 +10,8 @@ from pathlib import Path
 import anyio.to_thread
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
 from pydantic import BaseModel
-from sqlalchemy import select
+from fastapi.encoders import jsonable_encoder
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.aio import in_session, in_thread
@@ -113,6 +114,43 @@ async def status(db: AsyncSession = Depends(get_adb)):
                 presets=dict(synthetic=dict(available=True), m5=m5_available(get_settings().import_dir / "m5")),
                 last_job=dict(id=job.id, type=job.job_type, state=job.state, progress=job.progress, message=job.message, error=job.error, result=job.result) if job else None,
                 fields={k: v for k, v in importer.FIELDS.items()})
+
+
+# Fixed, whitelisted queries: the table name from the client only picks one of these; nothing is interpolated into SQL.
+PREVIEWS: dict[str, tuple[str, str]] = {
+    "mapped": ("SELECT month, oem_code AS oem, region_code AS region, product_code AS product, units, revenue_usd AS revenue_usd FROM mapped_series ORDER BY month DESC, oem_code, region_code, product_code",
+               "SELECT count(*) FROM mapped_series"),
+    "sales": ("SELECT s.month, a.name AS customer, s.product_code AS product, s.units, s.revenue_local AS revenue, s.currency FROM sales_actuals s JOIN accounts a ON a.id = s.account_id ORDER BY s.month DESC, a.name, s.product_code",
+              "SELECT count(*) FROM sales_actuals"),
+    "mapping": ("SELECT a.name AS customer, o.name AS oem, m.region_code AS region, m.allocation_pct, m.source, m.confidence, m.status FROM account_oem_mappings m JOIN accounts a ON a.id = m.account_id JOIN oems o ON o.id = m.oem_id ORDER BY a.name, o.name",
+                "SELECT count(*) FROM account_oem_mappings"),
+    "backlog": ("SELECT b.snapshot_month, b.delivery_month, a.name AS customer, b.product_code AS product, b.units, b.value_local AS value FROM backlog_snapshots b JOIN accounts a ON a.id = b.account_id ORDER BY b.snapshot_month DESC, b.delivery_month, a.name",
+                "SELECT count(*) FROM backlog_snapshots"),
+    "capacity": ("SELECT month, region_code AS region, product_code AS product, capacity_units FROM capacity_allocations ORDER BY month, region_code, product_code",
+                 "SELECT count(*) FROM capacity_allocations"),
+}
+
+
+@router.get("/preview")
+async def preview(table: str = "mapped", limit: int = 25, offset: int = 0, db: AsyncSession = Depends(get_adb)):
+    """Rows currently stored in the workspace. `mapped` is exactly what the forecast models train on."""
+    if table not in PREVIEWS:
+        raise HTTPException(404, f"unknown table; choose one of {sorted(PREVIEWS)}")
+    limit, offset = max(1, min(limit, 200)), max(0, offset)
+    q, cq = PREVIEWS[table]
+    total = (await db.execute(text(cq))).scalar_one()
+    res = await db.execute(text(f"{q} LIMIT :l OFFSET :o"), dict(l=limit, o=offset))
+    return jsonable_encoder(dict(table=table, total=total, limit=limit, offset=offset, columns=list(res.keys()), rows=[list(r) for r in res.all()]))
+
+
+@router.get("/overview")
+async def overview(db: AsyncSession = Depends(get_adb)):
+    """Per-OEM roll-up of the data the forecast uses, so a loaded dataset can be sanity-checked at a glance."""
+    res = await db.execute(text(
+        "SELECT oem_code AS oem, sum(units) AS units, sum(revenue_usd) AS revenue_usd, min(month) AS first_month, max(month) AS last_month, "
+        "count(DISTINCT (region_code, product_code)) AS series FROM mapped_series GROUP BY oem_code ORDER BY sum(revenue_usd) DESC LIMIT 15"))
+    cols = list(res.keys())
+    return jsonable_encoder(dict(columns=cols, rows=[list(r) for r in res.all()]))
 
 
 @router.get("/templates/{role}")

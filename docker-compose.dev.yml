@@ -7,7 +7,7 @@ x-backend-dev: &backend-dev
 services:
   api:
     <<: *backend-dev
-    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/app"]
+    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/app --timeout-graceful-shutdown 1"]
   worker:
     <<: *backend-dev
     # Celery has no autoreload: watchfiles restarts it when a .py file changes
