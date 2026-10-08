@@ -74,9 +74,11 @@ make web             # http://localhost:3000           (terminal 2)
 ```
 Then seed from **Admin → Jobs** exactly as above. Jobs run in a background thread when Celery is off.
 
+<p align="center"><img src="docs/screenshots/login.png" alt="Login landing page" width="860"/></p>
+
 ### Demo users (password `demo1234`)
 
-`admin@` · `planner@` · `steward@` · `viewer@` · `rep.amer@` · `rep.emea@` · `rep.apac@` — all `@demo.local`. The login page has one-click user pickers.
+`admin@` · `planner@` · `steward@` · `viewer@` · `rep.amer@` · `rep.emea@` · `rep.apac@` — all `@demo.local`. The landing page has one-click role cards (Planner, Admin, Steward, Viewer, three scoped Reps).
 
 ## 🧭 Product tour
 
