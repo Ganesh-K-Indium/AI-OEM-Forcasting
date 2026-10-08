@@ -1,0 +1,25 @@
+# Fast inner loop: source folders are mounted into the containers and auto-reload on save. No rebuilds for code changes.
+#   make dev-up      (= docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres redis api worker web-dev)
+# Rebuild (make docker-backend) only when backend dependencies change (pyproject.toml). Frontend deps: npm install runs on start.
+x-backend-dev: &backend-dev
+  volumes: [artifacts:/app/data, "./backend/data/import:/app/data/import", "./backend/app:/app/app"]
+
+services:
+  api:
+    <<: *backend-dev
+    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/app"]
+  worker:
+    <<: *backend-dev
+    # Celery has no autoreload: watchfiles restarts it when a .py file changes
+    command: ["watchfiles", "celery -A app.tasks.celery_app.celery_app worker --loglevel=INFO --concurrency=2", "/app/app"]
+  # Next.js dev server instead of the production `frontend` image (do not start `frontend` together with this one: same port)
+  web-dev:
+    image: node:20-alpine
+    working_dir: /app
+    command: ["sh", "-c", "npm install --no-audit --no-fund && npm run dev"]
+    environment: { NEXT_PUBLIC_API_URL: "${PUBLIC_API_URL:-http://localhost:8000}", NEXT_TELEMETRY_DISABLED: "1", WATCHPACK_POLLING: "true" }
+    volumes: ["./frontend:/app", "web_node_modules:/app/node_modules", "web_next:/app/.next"]
+    ports: ["3000:3000"]
+    depends_on: [api]
+
+volumes: { web_node_modules: {}, web_next: {} }

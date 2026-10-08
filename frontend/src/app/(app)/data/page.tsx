@@ -100,7 +100,17 @@ function SyntheticPanel({ hasData }: { hasData: boolean }) {
 // ------------------------------------------------------------------------------------------------ M5
 function M5Panel({ st }: { st: Status }) {
   const [limit, setLimit] = useState(""); const [level, setLevel] = useState("dept_id"); const [jobId, setJobId] = useState<string>(); const { refresh } = useWorkspace(); const qc = useQueryClient();
-  const p = st.presets.m5;
+  const p = st.presets.m5; const ref = useRef<HTMLInputElement>(null); const [over, setOver] = useState(false); const [log, setLog] = useState<string[]>([]);
+  const need = [["sales", "sales_train_evaluation.csv"], ["calendar", "calendar.csv"], ["prices", "sell_prices.csv"]] as const;
+  const up = useMutation({
+    mutationFn: async (files: File[]) => { for (const f of files) { const r = await upload<{ stored: string[] }>("/data/m5/upload", f); setLog((l) => [...l, `${f.name} → ${r.stored.join(", ")}`]); } },
+    onSettled: () => qc.invalidateQueries({ queryKey: ["data-status"] }),
+  });
+  const dl = useMutation({
+    mutationFn: (url: string) => post<{ stored: string[] }>("/data/m5/fetch", { url }),
+    onSuccess: (r) => setLog((l) => [...l, `link → ${r.stored.join(", ")}`]),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["data-status"] }),
+  });
   const m = useMutation({
     mutationFn: () => post<{ job_id: string }>("/data/import", { source: "m5", options: { limit_items: limit ? Number(limit) : null, m5_product_level: level, forecast_mode: "fast" } }),
     onSuccess: (r) => { setJobId(r.job_id); refresh(); },
@@ -109,43 +119,71 @@ function M5Panel({ st }: { st: Status }) {
     <Card>
       <CardHeader title="M5 benchmark (Walmart)" sub="Public retail data, daily 2011–2016. Mapped as store → OEM, state → region, department → product; revenue = units × weekly sell price." />
       <div className="space-y-4 p-4 text-sm">
-        {p.available ? <p className="flex items-center gap-1.5"><CheckCircle2 size={15} className="text-good" />M5 files found on the server.</p> : (
-          <div className="rounded-md border border-warn/50 bg-warn/15 p-3">
-            <p className="font-medium">M5 files are not on the server yet (missing: {p.missing.join(", ")}).</p>
-            <ol className="mt-2 list-decimal space-y-1 pl-5 text-xs text-ink2">
-              <li>Download “M5 Forecasting – Accuracy” from Kaggle (accept the competition rules first).</li>
-              <li>Copy <code>sales_train_evaluation.csv</code>, <code>calendar.csv</code> and <code>sell_prices.csv</code> into <code>{p.folder}</code> on the API host (with Docker: <code>backend/data/import/m5/</code> is mounted for this).</li>
-              <li>Reload this page.</li>
-            </ol>
-          </div>
-        )}
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div><Label>Product level</Label><Select className="w-full" value={level} onChange={(e) => setLevel(e.target.value)}><option value="dept_id">Department (7 products — recommended)</option><option value="cat_id">Category (3 products)</option></Select></div>
-          <div><Label>Only the first N items (quick trial, optional)</Label><Input inputMode="numeric" placeholder="all 3,049 items" value={limit} onChange={(e) => setLimit(e.target.value.replace(/\D/g, ""))} /></div>
+        <div>
+          <h4 className="mb-1 font-semibold">1. Get the files</h4>
+          <p className="text-xs text-ink2">On Kaggle open <b>“M5 Forecasting – Accuracy”</b> → Data → <b>Download all</b> (accept the competition rules once). You get <code>m5-forecasting-accuracy.zip</code> (~50 MB, a few hundred MB unzipped).</p>
         </div>
-        <p className="text-xs text-ink2">Not available for M5: distributor mapping, CRM uplift, backlog coverage, supply risk (the data has none of them) — those pages explain what is missing.</p>
-        {m.error && <ErrorBox error={m.error} />}
-        <Button disabled={!p.available || m.isPending || !!jobId} onClick={() => m.mutate()}>Load M5 and forecast</Button>
-        {jobId && <JobProgress jobId={jobId} onDone={() => { refresh(); qc.invalidateQueries({ queryKey: ["data-status"] }); }} />}
+        <div>
+          <h4 className="mb-1 font-semibold">2. Upload them here</h4>
+          <div onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)}
+            onDrop={(e) => { e.preventDefault(); setOver(false); const f = Array.from(e.dataTransfer.files); if (f.length) up.mutate(f); }}
+            onClick={() => ref.current?.click()} role="button" tabIndex={0} onKeyDown={(e) => e.key === "Enter" && ref.current?.click()} aria-label="Upload M5 files"
+            className={cn("flex cursor-pointer flex-col items-center gap-1 rounded-md border-2 border-dashed p-6 text-center hover:bg-line/30", over && "border-brand bg-brand/10")}>
+            <FileUp size={22} className="text-brand" />
+            <span className="font-medium">{up.isPending ? "Uploading… (large files take a minute)" : "Drop the zip here — or the 3 CSV files"}</span>
+            <span className="text-xs text-ink2">m5-forecasting-accuracy.zip · or sales_train_evaluation.csv, calendar.csv, sell_prices.csv</span>
+            <input ref={ref} type="file" multiple accept=".zip,.csv" hidden onChange={(e) => { const f = Array.from(e.target.files ?? []); if (f.length) up.mutate(f); e.target.value = ""; }} />
+          </div>
+          <UrlBox pending={dl.isPending} placeholder="…or paste a public link to the M5 zip (a mirror, S3/GCS/Drive direct link)" onSubmit={(url) => dl.mutate(url)} />
+          {(up.error || dl.error) && <p role="alert" className="mt-1 text-xs text-crit">{((up.error || dl.error) as Error).message}</p>}
+          <ul className="mt-2 grid gap-1 sm:grid-cols-3" aria-label="M5 files on the server">
+            {need.map(([k, f]) => { const ok = !p.missing.includes(k); return <li key={k} className={cn("flex items-center gap-1.5 rounded border px-2 py-1 text-xs", ok ? "bg-good/10" : "bg-line/30")}>{ok ? <CheckCircle2 size={13} className="text-good" /> : <span className="h-3 w-3 rounded-full border" />}{f}</li>; })}
+          </ul>
+          {log.length > 0 && <p className="mt-1 text-[11px] text-ink2">{log.join(" · ")}</p>}
+        </div>
+        <div>
+          <h4 className="mb-1 font-semibold">3. Load and forecast</h4>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div><Label>Product level</Label><Select className="w-full" value={level} onChange={(e) => setLevel(e.target.value)}><option value="dept_id">Department (7 products — recommended)</option><option value="cat_id">Category (3 products)</option></Select></div>
+            <div><Label>Only the first N items (quick trial, optional)</Label><Input inputMode="numeric" placeholder="all 3,049 items" value={limit} onChange={(e) => setLimit(e.target.value.replace(/\D/g, ""))} /></div>
+          </div>
+          <p className="my-2 text-xs text-ink2">Not available for M5: distributor mapping, CRM uplift, backlog coverage, supply risk (the data has none of them) — those pages explain what is missing.</p>
+          {m.error && <ErrorBox error={m.error} />}
+          <Button disabled={!p.available || m.isPending || !!jobId} onClick={() => m.mutate()}>{p.available ? "Load M5 and forecast" : "Upload the files first"}</Button>
+          {jobId && <div className="mt-3"><JobProgress jobId={jobId} onDone={() => { refresh(); qc.invalidateQueries({ queryKey: ["data-status"] }); }} /></div>}
+        </div>
       </div>
     </Card>
   );
 }
 
 // ------------------------------------------------------------------------------------------------ custom import wizard
+function UrlBox({ onSubmit, pending, placeholder }: { onSubmit: (url: string) => void; pending: boolean; placeholder: string }) {
+  const [url, setUrl] = useState("");
+  return (
+    <form className="mt-2 flex items-center gap-2" onSubmit={(e) => { e.preventDefault(); if (url.trim()) onSubmit(url.trim()); }}>
+      <Input type="url" aria-label="File URL" placeholder={placeholder} value={url} onChange={(e) => setUrl(e.target.value)} />
+      <Button type="submit" variant="outline" disabled={pending || !url.trim()}>{pending ? "Downloading…" : "Fetch"}</Button>
+    </form>
+  );
+}
+
 function FileDrop({ role, label, onUploaded }: { role: string; label: string; onUploaded: (u: Uploaded) => void }) {
   const ref = useRef<HTMLInputElement>(null); const [over, setOver] = useState(false);
   const m = useMutation({ mutationFn: (f: File) => upload<Uploaded>("/data/upload", f, { role }), onSuccess: onUploaded });
+  const u = useMutation({ mutationFn: (url: string) => post<Uploaded>("/data/fetch", { url, role }), onSuccess: onUploaded });
+  const err = m.error || u.error;
   return (
     <div>
       <div onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)}
         onDrop={(e) => { e.preventDefault(); setOver(false); const f = e.dataTransfer.files?.[0]; if (f) m.mutate(f); }}
         className={cn("flex cursor-pointer flex-col items-center gap-1 rounded-md border-2 border-dashed p-6 text-center text-sm hover:bg-line/30", over && "border-brand bg-brand/10")}
         onClick={() => ref.current?.click()} role="button" tabIndex={0} onKeyDown={(e) => e.key === "Enter" && ref.current?.click()} aria-label={label}>
-        <FileUp size={22} className="text-brand" /><span className="font-medium">{m.isPending ? "Uploading…" : label}</span><span className="text-xs text-ink2">CSV or Parquet · drag and drop or click</span>
-        <input ref={ref} type="file" accept=".csv,.tsv,.txt,.parquet" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) m.mutate(f); e.target.value = ""; }} />
+        <FileUp size={22} className="text-brand" /><span className="font-medium">{m.isPending ? "Uploading…" : label}</span><span className="text-xs text-ink2">CSV, Parquet or a .zip containing one · drag and drop or click</span>
+        <input ref={ref} type="file" accept=".csv,.tsv,.txt,.parquet,.zip" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) m.mutate(f); e.target.value = ""; }} />
       </div>
-      {m.error && <p role="alert" className="mt-1 text-xs text-crit">{(m.error as Error).message}</p>}
+      <UrlBox pending={u.isPending} placeholder="…or paste a public link (https://…/sales.csv or .zip)" onSubmit={(url) => u.mutate(url)} />
+      {err && <p role="alert" className="mt-1 text-xs text-crit">{(err as Error).message}</p>}
     </div>
   );
 }

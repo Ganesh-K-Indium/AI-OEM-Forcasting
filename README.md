@@ -140,6 +140,40 @@ curl -s localhost:8000/api/v1/admin/jobs -H "Authorization: Bearer $TOKEN" -H 'X
 
 `admin@` · `planner@` · `steward@` · `viewer@` · `rep.amer@` · `rep.emea@` · `rep.apac@` — all `@demo.local`. The landing page has one-click role cards (Planner, Admin, Steward, Viewer, three scoped Reps).
 
+### Docker cheat-sheet (run from the repo root)
+
+| I want to… | Command | Data |
+|---|---|---|
+| Start everything | `make docker-up` (= `docker compose up -d --build`) | kept |
+| Stop | `make docker-down` | **kept** |
+| Stop → rebuild → start (after code changes) | `make docker-restart` | kept |
+| Rebuild only backend (api + worker) | `make docker-backend` | kept |
+| Rebuild only the UI | `make docker-web` | kept |
+| Wipe everything and start fresh | `make docker-reset` (= `down -v` then `up --build`) | **deleted** |
+| Watch logs / status | `make docker-logs` · `make docker-ps` | – |
+
+### Fast dev loop (no rebuilds)
+
+Rebuilding images is only for production-style runs. While coding, mount the source and let it hot-reload:
+
+```bash
+make dev-up      # api (uvicorn --reload) + worker (auto-restart) + Next.js dev server; edit a file, save, it updates
+make dev-logs    # follow logs
+make dev-down    # stop (data kept)
+```
+
+| You changed… | Do |
+|---|---|
+| Backend `.py` / frontend `.tsx` | nothing — saved files reload (api in ~1 s, worker restarts, UI hot-swaps) |
+| `backend/pyproject.toml` (new Python dependency) | `make docker-backend` once |
+| `frontend/package.json` | `make dev-up` again (runs `npm install`) |
+| Database models | new tables in a *shared* schema: restart api; workspace tables: new workspaces get them automatically, existing ones need a migration (see GUIDE §25) |
+| Want to test the real production images | `make docker-restart` |
+
+Alternative without Docker for the app itself: `docker compose up -d postgres redis`, then `make api` and `make web` on your machine.
+
+After `docker-reset`: sign in as `admin@demo.local` / `demo1234`, open the *Synthetic demo* workspace → Data → Generate.
+
 ### Stop / reset
 
 ```bash
@@ -160,7 +194,7 @@ A **workspace** = one dataset + everything derived from it (mappings, forecast r
 
 *Workspaces → New workspace → "Your own data"* → **Data → Import**:
 
-1. **Upload** your sales-history file (CSV or Parquet, ≤ 800 MB; bigger files can sit in `backend/data/import/`). Optionally add: customer→OEM **mapping**, **backlog** snapshots, **capacity** allocation. Template downloads are on the page.
+1. **Upload** your sales-history file — CSV, Parquet, a **.zip** containing one, or paste a **public URL** to any of those (≤ 800 MB; the server downloads it; links to private networks are refused). Optionally add: customer→OEM **mapping**, **backlog** snapshots, **capacity** allocation. Template downloads are on the page.
 2. **Map columns** — headers are matched automatically (`date`/`period` → month, `client` → customer, `sku` → product, `qty` → units, `amount` → revenue, `territory` → region …); fix anything off. Only four fields are mandatory: **month, customer, product, units** plus revenue *or* price (or a constant price).
 3. **Check** — shows rows, months, customers, OEMs, regions, products, series and flags problems: unreadable dates, < 18 months of history (error), < 30 (warning), negative units, too many series (limit 600 OEM×region×product), daily/weekly data (summed to months; an incomplete last month is dropped).
 4. **Import** — a background job loads the data, builds the OEM hierarchy, materialises the history, runs the data-quality gate and (optionally) a first forecast. Importing **replaces** that workspace's data.
@@ -172,8 +206,8 @@ How your columns become the OEM hierarchy: no OEM column → each customer *is* 
 M5 is the public Walmart retail benchmark (daily unit sales of 3,049 items in 10 stores, 2011–2016). Good for checking forecast accuracy, MinT reconciliation and revenue conversion on data nobody generated. It has **no** distributors, pipeline, backlog or capacity, so only the forecasting, reconciliation, revenue and governance features apply.
 
 1. Create a workspace of type **M5 benchmark**.
-2. Download *M5 Forecasting – Accuracy* from Kaggle (accept the competition rules) and copy `sales_train_evaluation.csv`, `calendar.csv`, `sell_prices.csv` into **`backend/data/import/m5/`** (Docker mounts this folder into the API and worker).
-3. **Data → Load M5 and forecast** (or `python -m app.cli import-m5`). Mapping: store → OEM (10), state → region (3), department → product (7) = 70 series; revenue = units × weekly sell price; the incomplete last month is dropped. Tip: *first N items* gives a quick trial.
+2. Download *M5 Forecasting – Accuracy* from Kaggle (accept the competition rules once) — **Download all** gives `m5-forecasting-accuracy.zip`.
+3. In the app: **Data → drop the zip** (or the three CSVs) onto the upload box → the three file names tick green → **Load M5 and forecast**. (Alternative without the browser: copy the files into `backend/data/import/m5/` and run `python -m app.cli import-m5`.) Mapping: store → OEM (10), state → region (3), department → product (7) = 70 series; revenue = units × weekly sell price; the incomplete last month is dropped. Tip: *first N items* gives a quick trial.
 
 ## 🧭 Product tour
 

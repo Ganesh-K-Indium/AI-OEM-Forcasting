@@ -203,3 +203,35 @@ def test_m5_preset_maps_store_state_department(tmp_path):
     assert any("incomplete last month" in i["message"] for i in issues)  # 900 days from 2013-01-01 ends mid-June 2015
     assert c.revenue.sum() == pytest.approx(c.units.sum() * 2.5)
     assert c.month.max() < pd.Timestamp("2015-06-01")
+
+
+def test_zip_unpack_ssrf_guard_and_m5_zip(tmp_path):
+    import zipfile
+
+    from fastapi import HTTPException
+
+    from app.api import data as api
+
+    (tmp_path / "a.csv").write_text("month,customer\n2024-01-01,x\n")
+    z = tmp_path / "up.zip"
+    with zipfile.ZipFile(z, "w") as zf:
+        zf.write(tmp_path / "a.csv", "nested/dir/a.csv")
+        zf.writestr("readme.txt.bak", "ignore")
+    p, name = api._unpack(z, tmp_path, "abcd")
+    assert name == "a.csv" and p.read_text().startswith("month") and p.parent == tmp_path  # extracted flat, no traversal
+    empty = tmp_path / "e.zip"
+    with zipfile.ZipFile(empty, "w") as zf:
+        zf.writestr("x.pdf", "no data")
+    with pytest.raises(HTTPException):
+        api._unpack(empty, tmp_path, "abcd")
+    for bad in ("http://127.0.0.1/x.csv", "http://localhost:8000/a", "http://169.254.169.254/latest", "file:///etc/passwd", "ftp://example.com/a.csv"):
+        with pytest.raises(HTTPException):
+            api._check_public_url(bad)
+    m5 = tmp_path / "m5.zip"
+    with zipfile.ZipFile(m5, "w") as zf:
+        for n in ("calendar.csv", "sell_prices.csv", "sales_train_evaluation.csv", "sample_submission.csv"):
+            zf.writestr(f"deep/{n}", "x")
+    out = tmp_path / "out"
+    out.mkdir()
+    assert sorted(api._store_m5(m5, out, "m5.zip")) == ["calendar.csv", "sales_train_evaluation.csv", "sell_prices.csv"]
+    assert not (out / "sample_submission.csv").exists()
