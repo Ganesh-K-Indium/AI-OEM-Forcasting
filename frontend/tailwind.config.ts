@@ -6,9 +6,9 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        surface: "var(--surface)", raised: "var(--raised)", line: "var(--line)",
+        surface: "rgb(var(--surface-rgb) / <alpha-value>)", raised: "var(--raised)", line: "rgb(var(--line-rgb) / <alpha-value>)",
         ink: "var(--ink)", ink2: "var(--ink2)", muted: "var(--muted)",
-        brand: "var(--s1)", good: "var(--good)", warn: "var(--warn)", serious: "var(--serious)", crit: "var(--crit)",
+        brand: "rgb(var(--brand-rgb) / <alpha-value>)", good: "rgb(var(--good-rgb) / <alpha-value>)", warn: "rgb(var(--warn-rgb) / <alpha-value>)", serious: "rgb(var(--serious-rgb) / <alpha-value>)", crit: "rgb(var(--crit-rgb) / <alpha-value>)",
       },
       fontFamily: { sans: ["Inter", "system-ui", "sans-serif"] },
     },
