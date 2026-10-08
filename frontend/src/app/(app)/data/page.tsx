@@ -7,7 +7,7 @@ import { download, get, post, upload } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useWorkspace } from "@/lib/workspace-context";
 import type { Capabilities, Job } from "@/lib/types";
-import { Badge, Button, Card, CardHeader, ErrorBox, Input, Label, PageHeader, Select, Spinner, Table, Tabs, Td, Th } from "@/components/ui";
+import { Badge, Button, Card, CardHeader, ErrorBox, Input, Label, PageHeader, PageIntro, Select, Spinner, Table, Tabs, Td, Th } from "@/components/ui";
 import { cn, fmtNum } from "@/lib/utils";
 
 interface Status {
@@ -358,6 +358,15 @@ export default function DataPage() {
     <div className="space-y-4">
       <PageHeader title="Data" sub={<>Workspace <b>{w.name}</b> <Badge>{w.kind}</Badge> <Badge tone={w.status === "READY" ? "good" : w.status === "FAILED" ? "crit" : "info"}>{w.status}</Badge>{c.first_month && <> · history {c.first_month.slice(0, 7)} → {c.last_month?.slice(0, 7)}</>}</>}
         right={admin && w.kind !== "synthetic" && c.has_sales && <Button variant="outline" onClick={() => window.confirm("Remove all data, forecasts and overrides from this workspace?") && clear.mutate()}><Trash2 size={14} />Clear workspace</Button>} />
+      <PageIntro id="data"
+        what="Where data enters the platform. Load or generate a sales history, check what was loaded, and see exactly what the forecast will use. Features appear or disappear depending on which kinds of data are present."
+        steps={["Choose a source: generate demo data, import your own files (CSV, Parquet, zip or URL), or use the M5 public dataset.", "For your own files: upload, confirm which column is which, press Validate, then Import. Validate is a dry run and saves nothing.", "Importing replaces everything in this workspace, then rebuilds the history and (optionally) runs a first forecast.", "Check the tables at the bottom: ‘Used for forecasting’ is exactly what the models see."]}
+        points={[
+          ["Sales history", "The only required file: month, customer, product, units, and revenue or price. At least 18 months."],
+          ["Optional files", "A customer → OEM mapping, backlog (orders not yet shipped) and capacity (what can be produced). Each unlocks more features."],
+          ["Capabilities strip", "Shows which data is present and therefore which features are on."],
+          ["Used for forecasting", "Sales after they are linked to OEMs and summed by month, OEM, region and product."],
+        ]} />
       <Card><CardHeader title="What this workspace contains" sub="Pages and engines switch features on or off based on what is here." /><div className="p-4"><CapabilityStrip c={c} /></div></Card>
       {!admin ? <Card className="p-4 text-sm text-ink2">Only administrators can load or replace data. Ask an admin, or switch to a workspace that already has data.</Card>
         : w.kind === "synthetic" ? <SyntheticPanel hasData={c.has_sales} /> : w.kind === "m5" ? <M5Panel st={st} /> : <Wizard st={st} />}

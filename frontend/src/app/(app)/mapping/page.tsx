@@ -5,7 +5,7 @@ import { del, get, post, put } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import type { Account, Allocation, Candidate, Oem, Rule } from "@/lib/types";
 import { useRun } from "@/lib/run-context";
-import { Badge, Button, CapabilityNote, Card, CardHeader, Empty, ErrorBox, Input, Label, PageHeader, Select, Sheet, Spinner, Table, Tabs, Td, Th } from "@/components/ui";
+import { Badge, Button, CapabilityNote, Card, CardHeader, Empty, ErrorBox, Input, Label, PageHeader, PageIntro, Select, Sheet, Spinner, Table, Tabs, Td, Th } from "@/components/ui";
 import { fmtPct } from "@/lib/utils";
 
 const RULE_TYPES = ["GLOBAL_DUNS", "DUNS_EXACT", "TAX_ID", "ERP_PARENT", "DOMAIN", "ALIAS_EXACT", "NAME_REGEX"];
@@ -20,7 +20,7 @@ function Queue({ canEdit }: { canEdit: boolean }) {
       <CardHeader title="Steward review queue" sub="Fuzzy matches below the auto-apply threshold (0.93). Look-alike names are never auto-applied." />
       {m.error && <div role="alert" className="p-3 text-sm text-crit">{(m.error as Error).message}</div>}
       {q.isLoading ? <Spinner /> : q.error ? <ErrorBox error={q.error} /> : !q.data?.length ? <Empty>Queue is empty.</Empty> : (
-        <Table><thead><tr><Th>Account</Th><Th>Type</Th><Th>Suggested OEM</Th><Th>Region</Th><Th className="text-right">Confidence</Th><Th>Evidence</Th><Th /></tr></thead>
+        <Table><thead><tr><Th>Account</Th><Th tip="Direct customer or distributor.">Type</Th><Th>Suggested OEM</Th><Th>Region</Th><Th className="text-right" tip="0 to 1. How sure the matcher is.">Confidence</Th><Th tip="Why the matcher suggested this OEM.">Evidence</Th><Th /></tr></thead>
           <tbody>{q.data.map((c) => (
             <tr key={c.mapping_id}><Td className="font-medium">{c.account_name}</Td><Td className="text-xs">{c.account_type}</Td><Td>{c.suggested_oem}</Td><Td>{c.region_code}</Td>
               <Td className="text-right tabular-nums"><Badge tone={c.confidence >= 0.85 ? "info" : "warn"}>{fmtPct(c.confidence, 0)}</Badge></Td>
@@ -152,11 +152,26 @@ export default function MappingPage() {
           There are no distributors to resolve, so the review queue stays empty. Upload a customer → OEM mapping file on the Data page if some customers are distributors.
         </CapabilityNote>
       )}
+      <PageIntro id="mapping"
+        what="Sales are booked against the Sold-To customer, often a distributor, but the forecast is per OEM (the brand that really buys). This page decides which OEM each customer belongs to, so revenue lands under the right OEM."
+        steps={["Rules match obvious cases first (a tax ID, a name pattern).", "Anything left is matched by similar name. High-confidence matches (0.93 or more) are applied automatically.", "Medium matches (0.62–0.93) wait in the Review queue for a steward to approve or reject. Look-alike names are never applied automatically.", "After changing mappings, press Restate history so past sales are re-assigned to the new OEMs."]}
+        points={[
+          ["Sold-To / Account", "The customer record in the ERP that sales are recorded against."],
+          ["Mapping", "A link from an account to an OEM, with a region and a share (a distributor can serve several OEMs). Mappings have effective dates, so history can be restated."],
+          ["Confidence", "How sure the matcher is, from 0 to 1."],
+          ["Unmapped", "Sales that could not be linked to any OEM. They are kept in an ‘Unmapped’ bucket and not forecast per OEM, so keep this share small."],
+          ["Steward", "The person who approves or rejects uncertain mappings."],
+        ]} />
       <PageHeader title="Mapping" sub="Sold-To → End Customer → OEM, effective-dated; steward-approved"
-        right={canEdit && <><Button variant="outline" disabled={job.isPending} onClick={() => job.mutate("run")}>Run mapping</Button><Button variant="outline" disabled={job.isPending} onClick={() => job.mutate("restate")}>Restate history</Button></>} />
+        right={canEdit && <><Button variant="outline" title="Re-run the rules and name matcher over every account." disabled={job.isPending} onClick={() => job.mutate("run")}>Run mapping</Button><Button variant="outline" title="Rebuild the per-OEM sales history using the current mappings. Do this after approving or changing mappings." disabled={job.isPending} onClick={() => job.mutate("restate")}>Restate history</Button></>} />
       {job.isSuccess && <div role="status" className="mb-3 rounded border border-good/40 bg-good/10 p-2 text-sm">Job submitted — track progress in Admin → Jobs.</div>}
       {job.error && <div role="alert" className="mb-3 text-sm text-crit">{(job.error as Error).message}</div>}
-      <div className="mb-4"><Tabs value={tab} onChange={setTab} tabs={[{ id: "queue", label: "Review queue" }, { id: "accounts", label: "Accounts" }, { id: "rules", label: "Rules" }, { id: "oems", label: "OEM identifiers" }]} /></div>
+      <div className="mb-4"><Tabs value={tab} onChange={setTab} tabs={[
+        { id: "queue", label: "Review queue", hint: "Suggested matches the system is not sure about. Approve to apply, reject to discard. Each decision is recorded in the audit log." },
+        { id: "accounts", label: "Accounts", hint: "All customers in the sales data and the OEM each one currently maps to. Search, or set a mapping by hand." },
+        { id: "rules", label: "Rules", hint: "Fixed matching rules, checked in priority order (lowest number first) before the name-similarity matcher." },
+        { id: "oems", label: "OEM identifiers", hint: "The list of OEMs with their IDs and alternative names (aliases). Rules and the matcher use these to recognise a customer." },
+      ]} /></div>
       {tab === "queue" && <Queue canEdit={canEdit} />}{tab === "accounts" && <Accounts canEdit={canEdit} oems={oems.data ?? []} />}
       {tab === "rules" && <Rules canEdit={canEdit} />}{tab === "oems" && <Oems canEdit={canEdit} oems={oems.data ?? []} />}
     </div>

@@ -5,7 +5,7 @@ import { get, post } from "@/lib/api";
 import { useRun } from "@/lib/run-context";
 import { useAuth } from "@/lib/auth";
 import { REASONS, type Detail, type Explorer, type Filters, type Override, type ReasonCode } from "@/lib/types";
-import { Badge, Button, Card, CardHeader, Empty, ErrorBox, Input, Kpi, Label, PageHeader, Select, Sheet, Spinner, Table, Tabs, Td, Textarea, Th } from "@/components/ui";
+import { Badge, Button, Card, CardHeader, Empty, ErrorBox, Input, Help, Kpi, Label, PageHeader, PageIntro, Select, Sheet, Spinner, Table, Tabs, Td, Textarea, Th } from "@/components/ui";
 import { FanChart, type Metric } from "@/components/charts/FanChart";
 import { fmtMonth, fmtNum, fmtPct, fmtTs, fmtUsd } from "@/lib/utils";
 
@@ -43,6 +43,17 @@ function OverrideForm({ ex, onDone }: { ex: Explorer; onDone: () => void }) {
   );
 }
 
+const DRIVER_HELP: Record<string, string> = {
+  Segment: "The sales pattern of this series. It decides which models are tried.",
+  "Champion model": "The model with the best backtest score for this kind of series.",
+  ADI: "Average gap, in months, between months that have sales. 1 means sales every month; 1.32 or more counts as intermittent.",
+  "CV²": "How much the size of sales swings from month to month. High values mean erratic or lumpy demand.",
+  "Seasonal strength": "0 to 1: how much of the movement is a repeating yearly pattern. 0.7 or more counts as seasonal.",
+  "ACF(12)": "How closely a month resembles the same month one year earlier. Confirms seasonality.",
+  "Exogenous score": "How well sales-pipeline signals explain this series. High values mark it as complex.",
+  "Uplift β": "How strongly pipeline signals are turned into extra forecast volume for the whole run.",
+  "Commercial model": "The model that estimates the win probability of each open sales opportunity.",
+};
 const cm = (m: any) => (m && typeof m === "object" ? `win-prob model · OOF AUC ${m.oof_auc != null ? fmtNum(m.oof_auc, 2) : "n/a"} · ${m.closed_opps ?? "?"} closed opps` : m);
 type DTab = "drivers" | "opps" | "overrides" | "fva" | "audit" | "coverage";
 function DetailSheet({ open, onClose, oem, region, product }: { open: boolean; onClose: () => void; oem: string; region: string; product: string }) {
@@ -59,10 +70,17 @@ function DetailSheet({ open, onClose, oem, region, product }: { open: boolean; o
       {q.isLoading && <Spinner />}{q.error && <ErrorBox error={q.error} />}
       {d && (
         <div className="space-y-3">
-          <Tabs value={tab} onChange={setTab} tabs={[{ id: "drivers", label: "Drivers" }, { id: "opps", label: `SFDC opps (${d.opportunities.length})` }, { id: "overrides", label: `Overrides (${d.overrides.length})` }, { id: "fva", label: "FVA" }, { id: "coverage", label: "Coverage" }, { id: "audit", label: "Audit log" }]} />
+          <Tabs value={tab} onChange={setTab} tabs={[
+            { id: "drivers", label: "Drivers", hint: "Why the model behaves as it does for this series: its sales pattern, the numbers behind that label, and the model chosen." },
+            { id: "opps", label: `SFDC opps (${d.opportunities.length})`, hint: "Open Salesforce opportunities that add to this forecast. Win P is the platform's own win probability; Rep P is what the sales rep entered; Expected is the units weighted by win probability." },
+            { id: "overrides", label: `Overrides (${d.overrides.length})`, hint: "Manual changes made here. Each edit is a new revision (r1, r2…); nothing is overwritten." },
+            { id: "fva", label: "FVA", hint: "Forecast Value Added: did the AI and the overrides beat a simple ‘repeat the past’ forecast? Only available once past forecasts can be compared with actuals." },
+            { id: "coverage", label: "Coverage", hint: "For each future month: orders already booked (backlog) against the forecast. Below the threshold means the forecast is not yet backed by orders." },
+            { id: "audit", label: "Audit log", hint: "Who changed what and when. Each entry carries a fingerprint (hash) of the previous one, so edits to history would be detected." },
+          ]} />
           {tab === "drivers" && (
             <div className="grid grid-cols-2 gap-3 text-sm">
-              {drv.map(([k, v]) => <div key={k} className="rounded border p-2"><div className="text-xs text-ink2">{k}</div><div className="font-medium">{v ?? "—"}</div></div>)}
+              {drv.map(([k, v]) => <div key={k} className="rounded border p-2"><div className="text-xs text-ink2">{k}{DRIVER_HELP[k] && <> <Help title={k}>{DRIVER_HELP[k]}</Help></>}</div><div className="font-medium">{v ?? "—"}</div></div>)}
               {d.explorer.scenario_tag && <div className="col-span-2 text-xs text-ink2">Synthetic scenario tag: <Badge>{d.explorer.scenario_tag}</Badge></div>}
             </div>
           )}
@@ -118,18 +136,27 @@ export default function ExplorerPage() {
           <Select aria-label="Product" value={product} onChange={(e) => setProduct(e.target.value)}><option value="ALL">All products</option>{f.data?.products.map((p) => <option key={p.code} value={p.code}>{p.name ?? p.code}</option>)}</Select>
           <Select aria-label="Horizon" value={horizon} onChange={(e) => setHorizon(Number(e.target.value))}>{(f.data?.horizons ?? [3, 6, 12]).map((h) => <option key={h} value={h}>{h} mo</option>)}</Select>
         </>} />
+      <PageIntro id="explorer"
+        what="Zoom into any slice of the business. Choose an OEM, a region and a product (All means the total) to see its history, its forecast and the uncertainty range. If you know something the model cannot, add an override."
+        steps={["Pick the slice with the four selectors at the top (OEM, region, product, how many months ahead).", "Read the four tiles for the totals, and the chart for the shape over time.", "Press Details to see why the model forecasts what it does, which sales opportunities feed it, and its accuracy and audit trail.", "Planners and sales reps can press Add override to change a month's number. The AI baseline is never modified; the change is recorded and attributed."]}
+        points={[
+          ["Node", "One cell of the hierarchy: OEM × region × product. ‘All’ in a selector rolls everything up."],
+          ["Override", "A manual change to one month of the forecast, with a reason code. Overrides more than 60% away from the AI need a written comment."],
+          ["Uplift", "Extra revenue expected from open sales opportunities that the sales history alone would not predict."],
+          ["Champion", "The model that scored best in backtesting for this kind of series."],
+        ]} />
       {invalid && <div role="alert" className="mb-3 rounded border border-warn/50 bg-warn/15 p-2 text-sm">OEM × Product without a region is not a node in the hierarchy; choose a region or clear the product.</div>}
       {q.isLoading && !invalid && <Spinner />}{q.error && !invalid && <ErrorBox error={q.error} />}
       {ex && (
         <>
           <div className="mb-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <Kpi label={`Consensus revenue (${horizon} mo)`} value={fmtUsd(sum("consensus_revenue"))} />
-            <Kpi label="AI P50 revenue" value={fmtUsd(sum("revenue_p50"))} />
-            <Kpi label="Net commercial uplift" value={fmtUsd(sum("uplift_revenue"))} />
-            <Kpi label="Segment · champion" value={<span className="text-base">{ex.segment ?? "aggregate"} · {ex.champion_model ?? "—"}</span>} />
+            <Kpi label={`Consensus revenue (${horizon} mo)`} value={fmtUsd(sum("consensus_revenue"))} help="The agreed forecast for this slice over the chosen number of months: AI forecast plus overrides plus pipeline uplift." />
+            <Kpi label="AI P50 revenue" value={fmtUsd(sum("revenue_p50"))} help="What the AI alone expects: its most likely (P50, the middle) outcome, before any override. Compare with consensus to see how much people changed it." />
+            <Kpi label="Net commercial uplift" value={fmtUsd(sum("uplift_revenue"))} help="Extra revenue from open sales opportunities (CRM), counting only what the history-based forecast does not already expect, so nothing is counted twice. Zero when there is no CRM data." />
+            <Kpi label="Segment · champion" value={<span className="text-base">{ex.segment ?? "aggregate"} · {ex.champion_model ?? "—"}</span>} help="Segment = the sales pattern of this series (smooth, erratic, seasonal, intermittent, lumpy or complex). Champion = the model that won backtesting for it. Totals and roll-ups have no single segment or model." />
           </div>
           <Card>
-            <CardHeader title={`${ex.oem} / ${ex.region} / ${ex.product}`} sub={`Level ${ex.level}`}
+            <CardHeader title={`${ex.oem} / ${ex.region} / ${ex.product}`} sub={`Level ${ex.level}`} help="Line = actual history, then forecast. Shaded band = P10–P90 range. Hover for values. Switch between revenue and units with the selector on the right."
               right={<div className="flex gap-2">
                 <Select aria-label="Metric" value={metric} onChange={(e) => setMetric(e.target.value as Metric)}><option value="revenue">Revenue</option><option value="units">Units</option></Select>
                 <Button variant="outline" onClick={() => setDetail(true)}>Details</Button>

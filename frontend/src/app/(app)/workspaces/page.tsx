@@ -7,7 +7,7 @@ import { del, patch, post } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useWorkspace } from "@/lib/workspace-context";
 import type { Workspace, WorkspaceKind } from "@/lib/types";
-import { Badge, Button, Card, Empty, ErrorBox, Input, Label, PageHeader, Sheet, Textarea } from "@/components/ui";
+import { Badge, Button, Card, Empty, ErrorBox, Input, Label, PageHeader, PageIntro, Sheet, Textarea } from "@/components/ui";
 import { cn, fmtNum } from "@/lib/utils";
 
 const KINDS: { id: WorkspaceKind; title: string; icon: typeof Beaker; text: string; best: string }[] = [
@@ -42,6 +42,14 @@ export default function WorkspacesPage() {
     <div>
       <PageHeader title="Workspaces" sub="Each workspace is an isolated research context with its own data, mappings, forecasts, overrides, settings and audit trail."
         right={can("planner") && <Button onClick={() => setOpen(true)}><Plus size={14} />New workspace</Button>} />
+      <PageIntro id="workspaces"
+        what="A workspace is a separate, self-contained project with its own data, mappings, forecasts, overrides, settings and audit log. Nothing in one workspace affects another, so demo data and real data never mix."
+        points={[
+          ["Kinds", "Synthetic (generated demo data), M5 (a public retail benchmark) or Custom (your own files)."],
+          ["Status", "EMPTY (no data yet), IMPORTING / SEEDING (a job is loading), READY (can be forecast), FAILED (see Admin → Jobs)."],
+          ["Open workspace", "Switches into it. The workspace selector in the top bar changes it at any time."],
+          ["Chips on each card", "Which kinds of data the workspace holds, which controls the features it has."],
+        ]} />
       {(remove.error || archive.error) && <ErrorBox error={remove.error || archive.error} />}
       {workspaces.length === 0 ? <Card><Empty>No workspaces yet. Create one to start.</Empty></Card> : (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">

@@ -7,7 +7,7 @@ import { useAuth } from "@/lib/auth";
 import { useRun } from "@/lib/run-context";
 import { useWorkspace } from "@/lib/workspace-context";
 import type { Dq, Drift, Job, Setting, User } from "@/lib/types";
-import { Badge, Button, Card, CardHeader, Empty, ErrorBox, Input, Label, PageHeader, Select, Spinner, Table, Tabs, Td, Th } from "@/components/ui";
+import { Badge, Button, Card, CardHeader, Empty, ErrorBox, Input, Label, PageHeader, PageIntro, Select, Spinner, Table, Tabs, Td, Th } from "@/components/ui";
 import { fmtNum } from "@/lib/utils";
 import { JobsPanel } from "@/components/jobs-panel";
 
@@ -17,12 +17,12 @@ function Quality() {
   const drift = useQuery({ queryKey: ["drift", runId], queryFn: () => get<Drift[]>("/admin/drift", { run_id: runId }), enabled: !!runId });
   return (
     <div className="grid gap-4 xl:grid-cols-2">
-      <Card><CardHeader title="Data-quality gate" sub="Blocking errors prevent a forecast run." />
+      <Card><CardHeader title="Data-quality gate" sub="Blocking errors prevent a forecast run." help="Checks such as missing months, duplicates and a large unmapped share. A FAIL with severity ERROR stops the forecast until fixed; a WARN is shown but does not stop it. Run the check again from Jobs → Check data quality." />
         {dq.isLoading ? <Spinner /> : !dq.data?.length ? <Empty>No checks yet — run_dq.</Empty> : (
           <Table><thead><tr><Th>Check</Th><Th>Severity</Th><Th>Result</Th><Th>Message</Th></tr></thead>
             <tbody>{dq.data.map((c) => <tr key={c.check_name}><Td>{c.check_name}</Td><Td>{c.severity}</Td><Td><Badge tone={c.passed ? "good" : c.severity === "ERROR" ? "crit" : "warn"}>{c.passed ? "PASS" : "FAIL"}</Badge></Td><Td className="text-xs">{c.message}</Td></tr>)}</tbody></Table>)}
       </Card>
-      <Card><CardHeader title="Drift" sub="Feature PSI and forecast-error drift vs thresholds." />
+      <Card><CardHeader title="Drift" sub="Has recent data or accuracy moved away from the past?" help="FEATURE drift compares the last 12 months of demand with the earlier history, using PSI (population stability index). Above 0.25 is flagged as BREACHED: demand looks different from what the models learned. Error drift compares live forecast error with the error seen in backtesting." />
         {drift.isLoading ? <Spinner /> : !drift.data?.length ? <Empty>No drift metrics for this run.</Empty> : (
           <Table><thead><tr><Th>Kind</Th><Th>Name</Th><Th className="text-right">Value</Th><Th className="text-right">Threshold</Th><Th>Status</Th></tr></thead>
             <tbody>{drift.data.map((d, i) => <tr key={i}><Td>{d.kind}</Td><Td>{d.name}</Td><Td className="text-right tabular-nums">{fmtNum(d.value, 3)}</Td><Td className="text-right tabular-nums">{fmtNum(d.threshold, 3)}</Td><Td><Badge tone={d.breached ? "serious" : "good"}>{d.breached ? "BREACHED" : "OK"}</Badge></Td></tr>)}</tbody></Table>)}
@@ -79,7 +79,7 @@ export default function AdminPage() {
   const { can, user } = useAuth(); const { current } = useWorkspace(); const router = useRouter();
   useEffect(() => { if (user && user.role !== "admin") router.replace("/workspaces"); }, [user, router]);
   const [tab, setTab] = useState<"jobs" | "quality" | "settings" | "users">("jobs");
-  const tabs = [{ id: "jobs" as const, label: "Jobs" }, { id: "quality" as const, label: "Data quality & drift" }, { id: "settings" as const, label: "Settings" }, ...(can("admin") ? [{ id: "users" as const, label: "Users" }] : [])];
+  const tabs = [{ id: "jobs" as const, label: "Jobs", hint: "Run background tasks (generate data, map customers, forecast, recompute risk) and see what has run." }, { id: "quality" as const, label: "Data quality & drift", hint: "Health checks on the data, and signs that recent data or accuracy has moved away from what the models were tested on." }, { id: "settings" as const, label: "Settings", hint: "Tunable values for this workspace, such as forecast horizon, matching thresholds and approval rules. Every change is written to the audit log." }, ...(can("admin") ? [{ id: "users" as const, label: "Users" }] : [])];
   if (user?.role !== "admin") return null;
   return (
     <div>

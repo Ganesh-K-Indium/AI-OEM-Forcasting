@@ -6,7 +6,7 @@ import { get, patch, post, put } from "@/lib/api";
 import { useRun } from "@/lib/run-context";
 import { useAuth } from "@/lib/auth";
 import type { Alert, RiskSummary, Threshold } from "@/lib/types";
-import { Badge, Button, CapabilityNote, Card, CardHeader, Empty, ErrorBox, Input, Kpi, Label, PageHeader, Select, Sheet, Spinner, Table, Td, Textarea, Th, sevTone } from "@/components/ui";
+import { Badge, Button, CapabilityNote, Card, CardHeader, Empty, ErrorBox, Input, Kpi, Label, PageHeader, PageIntro, Select, Sheet, Spinner, Table, Td, Textarea, Th, sevTone } from "@/components/ui";
 import { fmtMonth, fmtPct, fmtUsd } from "@/lib/utils";
 
 const TYPES = ["REVENUE_GAP", "SUPPLY_BOTTLENECK", "PIPELINE_VULNERABILITY"];
@@ -52,9 +52,10 @@ function Thresholds() {
   const m = useMutation({ mutationFn: (t: Threshold) => put<Threshold>("/risk/thresholds", { ...t, min_coverage: edit[t.id] ?? t.min_coverage }), onSuccess: () => qc.invalidateQueries({ queryKey: ["thresholds"] }) });
   return (
     <Card className="mt-4">
-      <CardHeader title="Coverage thresholds" sub="Effective threshold = min(configured floor, historical P10 coverage by product × horizon) when relaxation is on" />
+      <CardHeader title="Coverage thresholds" sub="The minimum share of forecast that should already be backed by orders. Below it, a revenue-gap alert is raised."
+        help={<><p>Example: a minimum of 0.6 means that at least 60% of a month's forecast revenue should already be in backlog.</p><p>With <b>Hist. relax</b> on, the threshold is lowered to what was normally achieved in the past for that product and lead time, so products that are normally booked late do not raise constant false alarms.</p><p>Concentration: flags pipeline uplift when a few early-stage opportunities carry more than this share.</p></>} />
       {q.isLoading ? <Spinner /> : (
-        <Table><thead><tr><Th>Product</Th><Th>Region</Th><Th className="text-right">Min coverage</Th><Th>Hist. relax</Th><Th className="text-right">Concentration</Th><Th /></tr></thead>
+        <Table><thead><tr><Th>Product</Th><Th>Region</Th><Th className="text-right" tip="Minimum backlog ÷ forecast, e.g. 0.6 = 60%.">Min coverage</Th><Th tip="If yes, the threshold is lowered to what was historically achieved.">Hist. relax</Th><Th className="text-right" tip="Share of uplift from a few early-stage deals above which a pipeline alert is raised.">Concentration</Th><Th /></tr></thead>
           <tbody>{q.data?.map((t) => (
             <tr key={t.id}><Td>{t.product_code ?? "default"}</Td><Td>{t.region_code ?? "all"}</Td>
               <Td className="text-right"><Input type="number" step="0.05" min="0" max="1.5" className="ml-auto h-7 w-20 text-right" disabled={!can("planner")} value={edit[t.id] ?? t.min_coverage} onChange={(e) => setEdit({ ...edit, [t.id]: Number(e.target.value) })} /></Td>
@@ -85,6 +86,16 @@ export default function RiskPage() {
           Add the missing tables on the <Link href="/data" className="text-brand underline">Data</Link> page to switch them on.
         </CapabilityNote>
       )}
+      <PageIntro id="risk"
+        what="Finds the places where the forecast may not come true, and ranks them by money at stake. Each alert is a flagged OEM / region / product that someone should look at, take ownership of, and close out."
+        points={[
+          ["Revenue gap", "Coverage (backlog ÷ forecast) is below its threshold, so part of the forecast is not yet backed by orders. Impact = forecast revenue minus backlog."],
+          ["Supply bottleneck", "Forecast demand is higher than the factory capacity allocated, so the excess cannot be shipped. Impact = excess units × price."],
+          ["Pipeline vulnerability", "Part of the forecast uplift depends on a few large, early-stage sales opportunities, which makes it fragile."],
+          ["Severity", "HIGH / MEDIUM / LOW by the size of the financial impact."],
+          ["Status", "OPEN (new) → ACKNOWLEDGED (someone owns it) → RESOLVED (dealt with). Click an alert to see the evidence and update it."],
+          ["Recompute", "Re-runs the checks on the latest data. Run it after loading new backlog or capacity."],
+        ]} />
       <PageHeader title="Risk Center" sub="Coverage = Backlog ÷ Consensus. Sorted by financial impact."
         right={<>
           <Select aria-label="Type" value={type} onChange={(e) => setType(e.target.value)}><option value="">All types</option>{TYPES.map((t) => <option key={t} value={t}>{typeLabel(t)}</option>)}</Select>
@@ -92,13 +103,13 @@ export default function RiskPage() {
           {can("planner") && <Button variant="outline" disabled={refresh.isPending} onClick={() => refresh.mutate()}>{refresh.isPending ? "Refreshing…" : "Recompute"}</Button>}
         </>} />
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi label="Open alerts" value={sum.data?.open_alerts ?? "—"} />
-        <Kpi label="Revenue at risk" value={fmtUsd(sum.data?.revenue_at_risk_usd)} />
+        <Kpi label="Open alerts" value={sum.data?.open_alerts ?? "—"} help="Alerts that are not yet resolved." />
+        <Kpi label="Revenue at risk" value={fmtUsd(sum.data?.revenue_at_risk_usd)} help="Total impact of open revenue-gap and supply-bottleneck alerts. Pipeline-vulnerability alerts are listed separately because that money is uplift, not base forecast." />
         {TYPES.slice(0, 2).map((t) => <Kpi key={t} label={typeLabel(t)} value={fmtUsd(sum.data?.by_type?.[t]?.impact ?? sum.data?.by_type?.[t]?.impact_usd)} sub={`${sum.data?.by_type?.[t]?.count ?? 0} open`} />)}
       </div>
       <Card>
         {q.isLoading ? <Spinner /> : q.error ? <ErrorBox error={q.error} /> : !q.data?.length ? <Empty>No alerts match.</Empty> : (
-          <Table><thead><tr><Th>Severity</Th><Th>Type</Th><Th>Node</Th><Th>Window</Th><Th className="text-right">Impact</Th><Th>Status</Th><Th>Owner</Th></tr></thead>
+          <Table><thead><tr><Th tip="HIGH, MEDIUM or LOW by the size of the money at stake.">Severity</Th><Th>Type</Th><Th tip="OEM / region / product the alert is about.">Node</Th><Th tip="First and last month affected.">Window</Th><Th className="text-right" tip="Money at stake in USD.">Impact</Th><Th>Status</Th><Th tip="Person responsible for acting on it.">Owner</Th></tr></thead>
             <tbody>{q.data.map((a) => (
               <tr key={a.id} className="cursor-pointer hover:bg-line/40" onClick={() => setSel(a)} tabIndex={0} onKeyDown={(e) => e.key === "Enter" && setSel(a)}>
                 <Td><Badge tone={sevTone(a.severity)}>{a.severity}</Badge></Td><Td>{typeLabel(a.alert_type)}</Td><Td className="text-xs">{a.oem}/{a.region}/{a.product}</Td>

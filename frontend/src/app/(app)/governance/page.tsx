@@ -5,7 +5,7 @@ import { del, get, post } from "@/lib/api";
 import { useRun } from "@/lib/run-context";
 import { useAuth } from "@/lib/auth";
 import type { Audit, Cycle, Fva, Override } from "@/lib/types";
-import { Badge, Button, Card, CardHeader, Empty, ErrorBox, PageHeader, Select, Spinner, Table, Tabs, Td, Th } from "@/components/ui";
+import { Badge, Button, Card, CardHeader, Empty, ErrorBox, PageHeader, PageIntro, Select, Spinner, Table, Tabs, Td, Th } from "@/components/ui";
 import { fmtMonth, fmtPct, fmtTs, fmtUsd } from "@/lib/utils";
 
 function Overrides() {
@@ -45,7 +45,7 @@ function FvaTab() {
     <Card>
       <CardHeader title="Forecast Value Added" sub="FVA = wMAPE(reference) − wMAPE(forecast), matched lead time. Positive = better. Bootstrap 95% CI." right={can("planner") && <Button variant="outline" disabled={m.isPending} onClick={() => m.mutate()}>{m.isPending ? "Computing…" : "Recompute"}</Button>} />
       {q.isLoading ? <Spinner /> : q.error ? <ErrorBox error={q.error} /> : !q.data?.length ? <Empty>FVA needs frozen forecasts that have matured against actuals (lock cycles, then wait for actuals).</Empty> : (
-        <Table><thead><tr><Th>Scope</Th><Th>Lead (mo)</Th><Th className="text-right">n</Th><Th className="text-right">Naive</Th><Th className="text-right">AI</Th><Th className="text-right">Consensus</Th><Th className="text-right">AI vs naive</Th><Th className="text-right">Sales vs AI</Th><Th className="text-right">95% CI</Th><Th>Sig.</Th></tr></thead>
+        <Table><thead><tr><Th tip="Which slice of the data the row covers.">Scope</Th><Th tip="How many months ahead the forecast was made.">Lead (mo)</Th><Th className="text-right" tip="Number of forecast-versus-actual comparisons behind the row.">n</Th><Th className="text-right" tip="wMAPE of a simple ‘repeat the past’ forecast.">Naive</Th><Th className="text-right" tip="wMAPE of the AI baseline.">AI</Th><Th className="text-right" tip="wMAPE after overrides and uplift.">Consensus</Th><Th className="text-right" tip="Naive error minus AI error. Positive = the AI beats the naive forecast.">AI vs naive</Th><Th className="text-right" tip="AI error minus consensus error. Positive = the overrides improved the forecast.">Sales vs AI</Th><Th className="text-right">95% CI</Th><Th>Sig.</Th></tr></thead>
           <tbody>{q.data.map((f, i) => <tr key={i}><Td>{f.scope}</Td><Td>{f.horizon ?? "all"}</Td><Td className="text-right">{f.n_obs}</Td><Td className="text-right tabular-nums">{fmtPct(f.wmape_naive)}</Td><Td className="text-right tabular-nums">{fmtPct(f.wmape_ai)}</Td><Td className="text-right tabular-nums">{fmtPct(f.wmape_consensus)}</Td>
             <Td className="text-right tabular-nums">{fv(f.fva_ai)}</Td><Td className="text-right tabular-nums">{fv(f.fva_sales)}</Td><Td className="text-right text-xs tabular-nums">{f.fva_sales_ci_low != null ? `[${(f.fva_sales_ci_low * 100).toFixed(1)}, ${(f.fva_sales_ci_high! * 100).toFixed(1)}]` : "—"}</Td><Td>{f.significant ? <Badge tone="info">yes</Badge> : "no"}</Td></tr>)}</tbody></Table>
       )}
@@ -104,7 +104,21 @@ export default function GovernancePage() {
   return (
     <div>
       <PageHeader title="Governance" sub="Overrides, forecast value added, cycle lock and audit trail" />
-      <div className="mb-4"><Tabs value={tab} onChange={setTab} tabs={[{ id: "overrides", label: "Overrides" }, { id: "fva", label: "FVA" }, { id: "cycles", label: "Cycles & lock" }, { id: "audit", label: "Audit log" }]} /></div>
+      <PageIntro id="governance"
+        what="Where the forecast is controlled and measured. It answers: who changed the numbers and why, did those changes make the forecast better, and what exactly was agreed in each monthly cycle."
+        points={[
+          ["Override", "A manual change to the AI forecast, with a reason code and comment. Reasons: project delay, new win, capacity cap, or customer direct guidance."],
+          ["FVA (Forecast Value Added)", "Error of a simple baseline minus error of the forecast, in percentage points. A positive value means that step added value; negative means it made things worse."],
+          ["wMAPE", "Forecast error as a % of actual volume. Lower is better."],
+          ["Cycle states", "OPEN → FORECASTED → CONSENSUS → LOCKED. Locked cycles cannot change."],
+          ["Audit chain", "Each log entry stores a hash (fingerprint) of the one before it, so any later edit would break the chain and show up."],
+        ]} />
+      <div className="mb-4"><Tabs value={tab} onChange={setTab} tabs={[
+        { id: "overrides", label: "Overrides", hint: "Every manual change to the AI forecast. Edits are never overwritten; a change is a new revision. Withdrawing writes another revision. If approval is switched on, pending items wait for a planner to approve or reject." },
+        { id: "fva", label: "FVA", hint: "Forecast Value Added: do the AI and the people's adjustments beat a simple ‘repeat the past’ forecast? Positive = better. Only available after earlier forecasts were frozen and their months have happened." },
+        { id: "cycles", label: "Cycles & lock", hint: "The monthly planning rounds. Moving a cycle to consensus and then locking it freezes the numbers, so accuracy can later be measured against exactly what was agreed." },
+        { id: "audit", label: "Audit log", hint: "A tamper-evident history of every important change. Each entry includes a fingerprint of the previous one; the green badge means the chain checks out." },
+      ]} /></div>
       {tab === "overrides" && <Overrides />}{tab === "fva" && <FvaTab />}{tab === "cycles" && <Cycles />}{tab === "audit" && <AuditTab />}
     </div>
   );

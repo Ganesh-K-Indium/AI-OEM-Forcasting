@@ -1,6 +1,6 @@
 "use client";
 import * as Dialog from "@radix-ui/react-dialog";
-import { X, AlertTriangle, CheckCircle2, OctagonAlert, TriangleAlert, Info } from "lucide-react";
+import { X, AlertTriangle, CheckCircle2, OctagonAlert, TriangleAlert, Info, ChevronDown, ChevronRight, HelpCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import React from "react";
 
@@ -9,9 +9,66 @@ export function Button({ variant = "primary", size = "md", className, ...p }: Re
   return <button {...p} className={cn("inline-flex items-center justify-center gap-1.5 rounded-md font-medium transition disabled:cursor-not-allowed disabled:opacity-50", size === "sm" ? "h-7 px-2.5 text-xs" : "h-9 px-3.5 text-sm", v, className)} />;
 }
 export const Card = ({ className, ...p }: React.HTMLAttributes<HTMLDivElement>) => <div {...p} className={cn("rounded-lg border bg-raised", className)} />;
-export const CardHeader = ({ title, sub, right }: { title: React.ReactNode; sub?: React.ReactNode; right?: React.ReactNode }) => (
+/** Small "i" button that opens a plain-language explanation. Click or focus to open; Esc, outside click or scroll closes it. */
+export function Help({ title, children, className }: { title?: string; children: React.ReactNode; className?: string }) {
+  const [pos, setPos] = React.useState<{ left: number; top: number } | null>(null);
+  const btn = React.useRef<HTMLButtonElement>(null);
+  const box = React.useRef<HTMLDivElement>(null);
+  const close = React.useCallback(() => setPos(null), []);
+  React.useEffect(() => {
+    if (!pos) return;
+    const away = (e: MouseEvent) => { if (!box.current?.contains(e.target as Node) && !btn.current?.contains(e.target as Node)) close(); };
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && close();
+    document.addEventListener("mousedown", away); document.addEventListener("keydown", esc); window.addEventListener("scroll", close, true); window.addEventListener("resize", close);
+    return () => { document.removeEventListener("mousedown", away); document.removeEventListener("keydown", esc); window.removeEventListener("scroll", close, true); window.removeEventListener("resize", close); };
+  }, [pos, close]);
+  const toggle = () => {
+    if (pos) return close();
+    const r = btn.current!.getBoundingClientRect();
+    setPos({ left: Math.max(8, Math.min(r.left, window.innerWidth - 328)), top: r.bottom + 6 });
+  };
+  return (
+    <>
+      <button ref={btn} type="button" onClick={toggle} aria-label={`What is ${title ?? "this"}?`} aria-expanded={!!pos}
+        className={cn("inline-flex shrink-0 items-center rounded-full text-muted hover:text-brand focus-visible:text-brand", className)}><HelpCircle size={14} /></button>
+      {pos && (
+        <div ref={box} role="dialog" style={{ left: pos.left, top: pos.top }} className="fixed z-50 w-80 max-w-[calc(100vw-16px)] rounded-lg border bg-raised p-3 text-xs font-normal leading-relaxed text-ink shadow-xl">
+          {title && <div className="mb-1 text-sm font-semibold">{title}</div>}
+          <div className="space-y-1.5 text-ink2">{children}</div>
+        </div>
+      )}
+    </>
+  );
+}
+
+/** "About this page" box: a short plain-language summary plus a mini glossary. Closed by default; a page you opened stays open. */
+export function PageIntro({ id, what, points, steps }: { id: string; what: React.ReactNode; points?: [string, React.ReactNode][]; steps?: string[] }) {
+  const key = `intro:${id}`;
+  const [open, setOpen] = React.useState(false);
+  React.useEffect(() => { try { setOpen(localStorage.getItem(key) === "1"); } catch { /* storage unavailable */ } }, [key]);
+  const set = (v: boolean) => { setOpen(v); try { localStorage.setItem(key, v ? "1" : "0"); } catch { /* ignore */ } };
+  if (!open) return (
+    <button type="button" onClick={() => set(true)} className="mb-3 inline-flex items-center gap-1 text-xs text-ink2 hover:text-brand"><ChevronRight size={13} />About this page</button>
+  );
+  return (
+    <div className="mb-4 rounded-lg border border-brand/30 bg-brand/5 p-4 text-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-brand"><Info size={13} />About this page</div>
+        <button type="button" onClick={() => set(false)} className="inline-flex items-center gap-1 text-xs text-ink2 hover:text-ink" aria-label="Hide the page explanation"><ChevronDown size={13} />Hide</button>
+      </div>
+      <p className="mt-1.5 max-w-4xl text-ink">{what}</p>
+      {steps && steps.length > 0 && <ol className="mt-2 max-w-4xl list-decimal space-y-0.5 pl-5 text-xs text-ink2">{steps.map((t, i) => <li key={i}>{t}</li>)}</ol>}
+      {points && points.length > 0 && (
+        <dl className="mt-3 grid gap-x-6 gap-y-2 text-xs md:grid-cols-2">
+          {points.map(([k, v]) => <div key={k}><dt className="font-semibold text-ink">{k}</dt><dd className="text-ink2">{v}</dd></div>)}
+        </dl>
+      )}
+    </div>
+  );
+}
+export const CardHeader = ({ title, sub, right, help }: { title: React.ReactNode; sub?: React.ReactNode; right?: React.ReactNode; help?: React.ReactNode }) => (
   <div className="flex items-start justify-between gap-3 border-b px-4 py-3">
-    <div><h3 className="text-sm font-semibold">{title}</h3>{sub && <p className="mt-0.5 text-xs text-ink2">{sub}</p>}</div>{right}
+    <div><h3 className="flex items-center gap-1.5 text-sm font-semibold">{title}{help && <Help title={typeof title === "string" ? title : undefined}>{help}</Help>}</h3>{sub && <p className="mt-0.5 text-xs text-ink2">{sub}</p>}</div>{right}
   </div>
 );
 export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(function Input({ className, ...p }, ref) {
@@ -34,13 +91,17 @@ export const Badge = ({ tone = "neutral", children, className }: { tone?: Tone; 
 );
 export const sevTone = (s: string): Tone => ({ HIGH: "crit", MEDIUM: "warn", LOW: "info" } as Record<string, Tone>)[s] ?? "neutral";
 
-export function Tabs<T extends string>({ tabs, value, onChange }: { tabs: { id: T; label: string }[]; value: T; onChange: (v: T) => void }) {
+export function Tabs<T extends string>({ tabs, value, onChange }: { tabs: { id: T; label: string; hint?: string }[]; value: T; onChange: (v: T) => void }) {
+  const hint = tabs.find((t) => t.id === value)?.hint;
   return (
-    <div role="tablist" className="flex gap-1 border-b">
-      {tabs.map((t) => (
-        <button key={t.id} role="tab" aria-selected={value === t.id} onClick={() => onChange(t.id)}
-          className={cn("-mb-px border-b-2 px-3 py-2 text-sm", value === t.id ? "border-brand font-semibold text-ink" : "border-transparent text-ink2 hover:text-ink")}>{t.label}</button>
-      ))}
+    <div>
+      <div role="tablist" className="flex gap-1 overflow-x-auto border-b">
+        {tabs.map((t) => (
+          <button key={t.id} role="tab" aria-selected={value === t.id} onClick={() => onChange(t.id)} title={t.hint}
+            className={cn("-mb-px whitespace-nowrap border-b-2 px-3 py-2 text-sm", value === t.id ? "border-brand font-semibold text-ink" : "border-transparent text-ink2 hover:text-ink")}>{t.label}</button>
+        ))}
+      </div>
+      {hint && <p className="mt-2 max-w-4xl text-xs text-ink2">{hint}</p>}
     </div>
   );
 }
@@ -63,7 +124,10 @@ export function Sheet({ open, onOpenChange, title, children, wide }: { open: boo
 }
 
 export const Table = ({ className, ...p }: React.TableHTMLAttributes<HTMLTableElement>) => <div className="overflow-x-auto"><table {...p} className={cn("w-full text-sm", className)} /></div>;
-export const Th = ({ className, ...p }: React.ThHTMLAttributes<HTMLTableCellElement>) => <th {...p} className={cn("whitespace-nowrap border-b px-3 py-2 text-left text-xs font-medium text-ink2", className)} />;
+/** `tip` adds a hover explanation (dotted underline marks the column as explained). */
+export const Th = ({ className, tip, children, ...p }: React.ThHTMLAttributes<HTMLTableCellElement> & { tip?: string }) => (
+  <th {...p} className={cn("whitespace-nowrap border-b px-3 py-2 text-left text-xs font-medium text-ink2", className)}>{tip ? <span title={tip} className="cursor-help underline decoration-dotted underline-offset-4">{children}</span> : children}</th>
+);
 export const Td = ({ className, ...p }: React.TdHTMLAttributes<HTMLTableCellElement>) => <td {...p} className={cn("border-b px-3 py-2 align-top", className)} />;
 
 export const Spinner = () => <div className="flex items-center gap-2 p-6 text-sm text-ink2"><span className="h-3 w-3 animate-spin rounded-full border-2 border-brand border-t-transparent" />Loading…</div>;
@@ -72,10 +136,10 @@ export const ErrorBox = ({ error }: { error: unknown }) => (
 );
 export const Empty = ({ children }: { children: React.ReactNode }) => <div className="p-8 text-center text-sm text-ink2">{children}</div>;
 
-export function Kpi({ label, value, sub, tone }: { label: string; value: React.ReactNode; sub?: React.ReactNode; tone?: Tone }) {
+export function Kpi({ label, value, sub, tone, help }: { label: string; value: React.ReactNode; sub?: React.ReactNode; tone?: Tone; help?: React.ReactNode }) {
   return (
     <Card className="p-4">
-      <div className="text-xs font-medium text-ink2">{label}</div>
+      <div className="flex items-center gap-1 text-xs font-medium text-ink2">{label}{help && <Help title={label}>{help}</Help>}</div>
       <div className="mt-1 text-2xl font-semibold tabular-nums">{value}</div>
       {sub && <div className="mt-1 text-xs text-ink2">{tone && <Badge tone={tone} className="mr-1">{" "}</Badge>}{sub}</div>}
     </Card>
