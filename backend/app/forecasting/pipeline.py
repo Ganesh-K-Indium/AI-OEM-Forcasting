@@ -128,7 +128,7 @@ def _run(session: Session, run: ForecastRun, cycle_month: date, kind: str, mode:
     crm = da.load_crm(session, cycle_month)
     drivers = da.pipeline_drivers(crm, panel.months, hier)
     cuts = dict(adi_cut=get_setting(session, "segment_adi_cutoff"), cv2_cut=get_setting(session, "segment_cv2_cutoff"),
-                seas_min=get_setting(session, "segment_seasonality_min"), exog_min=get_setting(session, "segment_exog_min"))
+                seas_min=get_setting(session, "segment_seasonality_min"), acf_min=get_setting(session, "segment_seasonal_acf_min"), exog_min=get_setting(session, "segment_exog_min"))
     stats = {u: classify(panel.units_nodes[u].to_numpy(), drivers[u], **cuts) for u in ids}
     segs = {u: s.segment for u, s in stats.items()}
     # ------------------------------------------------------------------ 2. backtest + champions
