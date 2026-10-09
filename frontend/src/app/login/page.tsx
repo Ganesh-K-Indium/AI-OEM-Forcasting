@@ -3,8 +3,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Eye, EyeOff, GitMerge, Layers, Scale, ShieldAlert, LineChart } from "lucide-react";
 import { useAuth } from "@/lib/auth";
-import { Button, Input, Label } from "@/components/ui";
-import { cn } from "@/lib/utils";
+import { Button, Input, Label, Select } from "@/components/ui";
 
 const DEMO = [
   { id: "planner", role: "Planner", hint: "overrides, lock cycles" },
@@ -59,18 +58,18 @@ export default function Login() {
     try { await login(email, password); router.replace("/workspaces"); } catch (x) { setErr((x as Error).message); } finally { setBusy(false); }
   };
   return (
-    <div className="grid min-h-screen lg:grid-cols-[1.15fr_1fr]">
-      <section className="relative hidden flex-col justify-between overflow-hidden border-r bg-raised p-10 lg:flex" aria-label="About the platform">
+    <div className="grid min-h-screen lg:grid-cols-[minmax(0,7fr)_minmax(400px,3fr)]">
+      <section className="relative hidden flex-col justify-between overflow-hidden border-r bg-raised p-10 xl:p-14 lg:flex" aria-label="About the platform">
         <div>
           <div className="mb-10 flex items-center gap-2 text-sm font-semibold"><span className="grid h-7 w-7 place-items-center rounded-md bg-brand text-white"><LineChart size={15} /></span>OEM Revenue Forecast</div>
-          <h1 className="max-w-lg text-4xl font-semibold leading-tight">Know what each OEM will buy — and how sure you are.</h1>
-          <p className="mt-4 max-w-lg text-ink2">One governed forecast across OEM, region and product. ERP history and CRM pipeline stay separate, the hierarchy always adds up, and every override is measured.</p>
-          <div className="mt-8 max-w-lg rounded-lg border bg-surface p-4">
+          <h1 className="max-w-2xl text-4xl xl:text-5xl font-semibold leading-tight">Know what each OEM will buy — and how sure you are.</h1>
+          <p className="mt-4 max-w-2xl text-base text-ink2">One governed forecast across OEM, region and product. ERP history and CRM pipeline stay separate, the hierarchy always adds up, and every override is measured.</p>
+          <div className="mt-8 max-w-3xl rounded-lg border bg-surface p-5">
             <HeroChart />
             <p className="mt-1 text-[11px] text-muted">Illustration only — not real data.</p>
           </div>
         </div>
-        <ul className="mt-8 grid max-w-2xl gap-x-6 gap-y-4 sm:grid-cols-2">
+        <ul className="mt-8 grid max-w-4xl gap-x-8 gap-y-5 sm:grid-cols-2 xl:grid-cols-3">
           {FEATURES.map(({ icon: I, title, text }) => (
             <li key={title} className="flex gap-3">
               <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-md bg-brand/15 text-brand"><I size={15} /></span>
@@ -98,19 +97,14 @@ export default function Login() {
             <Button className="h-10 w-full" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</Button>
           </form>
 
-          <div className="mt-8">
-            <div className="mb-2 flex items-center gap-3 text-xs text-ink2"><span className="h-px flex-1 bg-line" />Try a demo role · password <code className="rounded bg-line/70 px-1">demo1234</code><span className="h-px flex-1 bg-line" /></div>
-            <div className="grid grid-cols-2 gap-2">
-              {DEMO.map((d) => {
-                const active = email === `${d.id}@demo.local`;
-                return (
-                  <button key={d.id} type="button" onClick={() => { setEmail(`${d.id}@demo.local`); setPassword("demo1234"); }} aria-pressed={active}
-                    className={cn("rounded-md border px-3 py-2 text-left transition hover:bg-line/50", active && "border-brand bg-brand/10")}>
-                    <div className="text-sm font-medium">{d.role}</div><div className="text-[11px] text-ink2">{d.hint}</div>
-                  </button>
-                );
-              })}
-            </div>
+          <div className="mt-6">
+            <Label>Or sign in with a demo role</Label>
+            <Select className="w-full" aria-label="Demo role" value={DEMO.some((d) => email === `${d.id}@demo.local`) ? email : ""}
+              onChange={(e) => { if (e.target.value) { setEmail(e.target.value); setPassword("demo1234"); } }}>
+              <option value="">Choose a demo role…</option>
+              {DEMO.map((d) => <option key={d.id} value={`${d.id}@demo.local`}>{d.role} — {d.hint}</option>)}
+            </Select>
+            <p className="mt-1 text-[11px] text-ink2">Fills the form above. Password for all demo roles: <code className="rounded bg-line/70 px-1">demo1234</code></p>
           </div>
         </div>
       </main>
