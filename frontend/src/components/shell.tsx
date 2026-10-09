@@ -30,14 +30,15 @@ function Topbar() {
   const { meta, runs, runId, setRunId } = useRun();
   const { workspaces, current, select } = useWorkspace();
   const { user, logout } = useAuth();
-  const [theme, setTheme] = useState<"light" | "dark" | "auto">("auto");
-  useEffect(() => { try { const t = localStorage.getItem("oem.theme") as "light" | "dark" | null; if (t) setTheme(t); } catch { /* blocked */ } }, []);
-  useEffect(() => {
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+  useEffect(() => { try { if (localStorage.getItem("oem.theme") === "dark") setTheme("dark"); } catch { /* blocked */ } }, []);
+  const choose = (t: "light" | "dark") => {
+    setTheme(t);
     const el = document.documentElement;
-    if (theme === "auto") el.removeAttribute("data-theme"); else el.setAttribute("data-theme", theme);
-    try { theme === "auto" ? localStorage.removeItem("oem.theme") : localStorage.setItem("oem.theme", theme); } catch { /* blocked */ }
-  }, [theme]);
-  const isDark = theme === "dark" || (theme === "auto" && typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+    if (t === "dark") el.setAttribute("data-theme", "dark"); else el.removeAttribute("data-theme");
+    try { t === "dark" ? localStorage.setItem("oem.theme", "dark") : localStorage.removeItem("oem.theme"); } catch { /* blocked */ }
+  };
+  const isDark = theme === "dark";
   return (
     <header className="sticky top-0 z-30 border-b bg-surface/95 backdrop-blur">
       {isGlobal(path) ? null : meta?.synthetic_mode ? (
@@ -65,7 +66,7 @@ function Topbar() {
           </>}
         </div>
         <div className="flex items-center gap-2 text-sm">
-          <button className="rounded p-1.5 hover:bg-line/60" aria-label="Toggle theme" onClick={() => setTheme(isDark ? "light" : "dark")}>{isDark ? <Sun size={16} /> : <Moon size={16} />}</button>
+          <button className="rounded p-1.5 hover:bg-line/60" aria-label="Toggle theme" onClick={() => choose(isDark ? "light" : "dark")}>{isDark ? <Sun size={16} /> : <Moon size={16} />}</button>
           {user && <span className="hidden text-ink2 sm:inline">{user.full_name} <Badge>{user.role}</Badge></span>}
           <button className="rounded p-1.5 hover:bg-line/60" aria-label="Sign out" onClick={logout}><LogOut size={16} /></button>
         </div>

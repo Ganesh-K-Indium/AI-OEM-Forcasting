@@ -6,7 +6,8 @@ export const metadata: Metadata = { title: "OEM Revenue Forecast", description: 
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head><script dangerouslySetInnerHTML={{ __html: `try{if(localStorage.getItem("oem.theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}` }} /></head>
       <body className="min-h-screen bg-surface font-sans text-ink antialiased"><Providers>{children}</Providers></body>
     </html>
   );
